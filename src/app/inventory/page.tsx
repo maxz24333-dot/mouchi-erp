@@ -25,6 +25,18 @@ const STRATEGY_OPTS = [
   { v: 'skip',   l: '⛔ 放棄' },
 ] as const
 
+const SHIPPING_KEY: Record<string, string> = {
+  thailand: 'thailand_shipping_per_kg', haido: 'haido_shipping_per_kg',
+  mdm: 'mdm_shipping_per_kg', sd: 'sd_shipping_per_kg',
+  other: 'other_shipping_per_kg', korea: 'korea_shipping_per_kg',
+}
+
+function getTaxMultiplier(source: string, includeTax: boolean) {
+  if (source === 'korea') return includeTax ? 1.1 : 1
+  if (['haido', 'mdm', 'sd', 'other'].includes(source)) return 1.1
+  return 1
+}
+
 export default function InventoryPage() {
   const [products, setProducts]         = useState<any[]>([])
   const [loading, setLoading]           = useState(true)
@@ -33,8 +45,17 @@ export default function InventoryPage() {
   const [strategyFilter, setStrategyFilter] = useState<StrategyFilter>('all')
   const [stockFilter, setStockFilter]   = useState<StockFilter>('all')
   const [exporting, setExporting]       = useState(false)
+  const [settings, setSettings]         = useState<Record<string, number>>({
+    thailand_shipping_per_kg: 160, haido_shipping_per_kg: 280,
+    mdm_shipping_per_kg: 280, sd_shipping_per_kg: 280,
+    other_shipping_per_kg: 280, korea_shipping_per_kg: 165,
+    handling_fee_pct: 0.05,
+  })
 
-  useEffect(() => { fetchProducts() }, [])
+  useEffect(() => {
+    fetchProducts()
+    fetch('/api/settings').then(r => r.json()).then(d => { if (d) setSettings(prev => ({ ...prev, ...d })) }).catch(() => {})
+  }, [])
 
   async function fetchProducts() {
     setLoading(true)
@@ -61,45 +82,40 @@ export default function InventoryPage() {
     ))
   }
 
-  async function handleUpdatePrice(id: string, price: number) {
-    await fetch(`/api/products/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ my_selling_price: price }),
-    })
-    setProducts(prev => prev.map(p => p.id === id ? { ...p, my_selling_price: price } : p))
-  }
-
-  async function handleUpdateNotes(id: string, notes: string) {
-    await fetch(`/api/products/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ notes }),
-    })
-    setProducts(prev => prev.map(p => p.id === id ? { ...p, notes } : p))
-  }
-
-  async function handleUpdateAdCopy(id: string, ad_copy: string) {
-    await fetch(`/api/products/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ad_copy }),
-    })
-    setProducts(prev => prev.map(p => p.id === id ? { ...p, ad_copy } : p))
-  }
-
-  async function handleAddStock(id: string, qty: number) {
+  async function handleSaveProduct(id: string, edits: Record<string, any>) {
     const product = products.find(p => p.id === id)
     if (!product) return
-    const stock_quantity = product.stock_quantity + qty
+    const merged = { ...product, ...edits }
+    const costFields = ['original_cost', 'weight_g', 'packaging_fee', 'service_fee_pct']
+    const costChanged = costFields.some(k => k in edits)
+
+    let updates: Record<string, any> = { ...edits }
+
+    if (costChanged) {
+      const shippingPerKg = settings[SHIPPING_KEY[merged.source]] ?? 280
+      const taxMult = getTaxMultiplier(merged.source, merged.include_tax)
+      const twd_cost = (merged.original_cost * taxMult + merged.original_cost * merged.service_fee_pct) * merged.exchange_rate
+      const shipping_fee = (merged.weight_g / 1000) * shippingPerKg
+      const total_cost = twd_cost + shipping_fee + merged.packaging_fee
+      const total_cost_with_handling = total_cost * (1 + (settings.handling_fee_pct ?? 0.05))
+      updates = { ...updates, twd_cost, shipping_fee, total_cost, total_cost_with_handling }
+    }
+
+    const sp = 'my_selling_price' in edits ? edits.my_selling_price : product.my_selling_price
+    const cwh = updates.total_cost_with_handling ?? product.total_cost_with_handling
+    if (sp && cwh) updates.profit_margin = (sp - cwh) / sp
+
     await fetch(`/api/products/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stock_quantity }),
+      body: JSON.stringify(updates),
     })
-    setProducts(prev => prev.map(p =>
-      p.id === id ? { ...p, stock_quantity, remaining_stock: stock_quantity - p.sold_quantity } : p
-    ))
+    setProducts(prev => prev.map(p => {
+      if (p.id !== id) return p
+      const n = { ...p, ...updates }
+      n.remaining_stock = n.stock_quantity - n.sold_quantity
+      return n
+    }))
   }
 
   async function handleDelete(id: string) {
@@ -216,7 +232,7 @@ export default function InventoryPage() {
             <div className="skeleton h-4 w-1/2 mx-auto" />
           </div>
         ) : (
-          <InventoryTable products={filtered} onSold={handleSold} onUpdatePrice={handleUpdatePrice} onUpdateNotes={handleUpdateNotes} onUpdateAdCopy={handleUpdateAdCopy} onAddStock={handleAddStock} onDelete={handleDelete} />
+          <InventoryTable products={filtered} onSold={handleSold} onSave={handleSaveProduct} onDelete={handleDelete} />
         )}
       </div>
     </div>
@@ -293,7 +309,7 @@ export default function InventoryPage() {
             {!search && <Link href="/" className="mt-3 inline-block text-pink-500 text-sm font-medium">前往入庫 →</Link>}
           </div>
         ) : filtered.map(product => (
-          <ProductCard key={product.id} product={product} onSold={handleSold} onUpdatePrice={handleUpdatePrice} onUpdateNotes={handleUpdateNotes} onUpdateAdCopy={handleUpdateAdCopy} onAddStock={handleAddStock} />
+          <ProductCard key={product.id} product={product} onSold={handleSold} onSave={handleSaveProduct} />
         ))}
       </div>
 

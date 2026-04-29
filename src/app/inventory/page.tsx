@@ -70,6 +70,43 @@ export default function InventoryPage() {
     setProducts(prev => prev.map(p => p.id === id ? { ...p, my_selling_price: price } : p))
   }
 
+  async function handleUpdateNotes(id: string, notes: string) {
+    await fetch(`/api/products/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notes }),
+    })
+    setProducts(prev => prev.map(p => p.id === id ? { ...p, notes } : p))
+  }
+
+  async function handleUpdateAdCopy(id: string, ad_copy: string) {
+    await fetch(`/api/products/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ad_copy }),
+    })
+    setProducts(prev => prev.map(p => p.id === id ? { ...p, ad_copy } : p))
+  }
+
+  async function handleAddStock(id: string, qty: number) {
+    const product = products.find(p => p.id === id)
+    if (!product) return
+    const stock_quantity = product.stock_quantity + qty
+    await fetch(`/api/products/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stock_quantity }),
+    })
+    setProducts(prev => prev.map(p =>
+      p.id === id ? { ...p, stock_quantity, remaining_stock: stock_quantity - p.sold_quantity } : p
+    ))
+  }
+
+  async function handleDelete(id: string) {
+    await fetch(`/api/products/${id}`, { method: 'DELETE' })
+    setProducts(prev => prev.filter(p => p.id !== id))
+  }
+
   async function handleExport() {
     setExporting(true)
     try {
@@ -179,7 +216,7 @@ export default function InventoryPage() {
             <div className="skeleton h-4 w-1/2 mx-auto" />
           </div>
         ) : (
-          <InventoryTable products={filtered} onSold={handleSold} onUpdatePrice={handleUpdatePrice} />
+          <InventoryTable products={filtered} onSold={handleSold} onUpdatePrice={handleUpdatePrice} onUpdateNotes={handleUpdateNotes} onUpdateAdCopy={handleUpdateAdCopy} onAddStock={handleAddStock} onDelete={handleDelete} />
         )}
       </div>
     </div>
@@ -256,7 +293,7 @@ export default function InventoryPage() {
             {!search && <Link href="/" className="mt-3 inline-block text-pink-500 text-sm font-medium">前往入庫 →</Link>}
           </div>
         ) : filtered.map(product => (
-          <ProductCard key={product.id} product={product} onSold={handleSold} onUpdatePrice={handleUpdatePrice} />
+          <ProductCard key={product.id} product={product} onSold={handleSold} onUpdatePrice={handleUpdatePrice} onUpdateNotes={handleUpdateNotes} onUpdateAdCopy={handleUpdateAdCopy} onAddStock={handleAddStock} />
         ))}
       </div>
 

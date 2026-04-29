@@ -328,7 +328,7 @@ export async function POST(req: NextRequest) {
     const sStats = computePriceStats(socialPrices)
 
     const totalSellerCount = ecommerceCount + Math.floor(socialCount / 2)
-    const lifecycle = eStats
+    const lifecycle = (eStats && brandInfo.isBranded)
       ? computeLifecycle(totalSellerCount)
       : { stage: null, stageAdvice: null, suggestedMultiplier: 1.0 }
 

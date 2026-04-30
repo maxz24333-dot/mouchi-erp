@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, Fragment } from 'react'
 
 const SOURCE_LABEL: Record<string, string> = {
   thailand: '🇹🇭 泰國', haido: '🇯🇵 海度', mdm: '🇯🇵 MDM',
@@ -125,10 +125,9 @@ export default function InventoryTable({ products, onSold, onSave, onDelete }: P
             const currency   = CURRENCY_LABEL[p.source] ?? 'JPY'
 
             return (
-              <>
+              <Fragment key={p.id}>
                 {/* ── Main row ─────────────────────────────────────── */}
                 <tr
-                  key={p.id}
                   className={`border-b border-gray-50 transition-colors ${isEditing ? 'bg-blue-50/30' : 'hover:bg-gray-50/60'}`}
                 >
                   <td className="px-3 py-2.5">
@@ -197,7 +196,7 @@ export default function InventoryTable({ products, onSold, onSave, onDelete }: P
 
                 {/* ── Edit panel (full-width row) ───────────────────── */}
                 {isEditing && (
-                  <tr key={`${p.id}-edit`} className="bg-gray-50/80 border-b-2 border-blue-100">
+                  <tr className="bg-gray-50/80 border-b-2 border-blue-100">
                     <td colSpan={10} className="px-6 py-5">
                       <div className="grid grid-cols-4 gap-6">
 
@@ -299,7 +298,7 @@ export default function InventoryTable({ products, onSold, onSave, onDelete }: P
                     </td>
                   </tr>
                 )}
-              </>
+              </Fragment>
             )
           })}
         </tbody>

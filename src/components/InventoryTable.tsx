@@ -9,9 +9,9 @@ const CURRENCY_LABEL: Record<string, string> = {
   thailand: 'THB', haido: 'JPY', mdm: 'JPY', sd: 'JPY', other: 'JPY', korea: 'KRW',
 }
 const STRATEGY_CONFIG: Record<string, { label: string; cls: string }> = {
-  lead:   { label: '📣 引流', cls: 'bg-blue-50 text-blue-700' },
+  lead:   { label: '📣 引流', cls: 'bg-blue-50 text-blue-600' },
   profit: { label: '💰 利潤', cls: 'bg-green-50 text-green-700' },
-  skip:   { label: '⛔ 放棄', cls: 'bg-red-50 text-red-600' },
+  skip:   { label: '⛔ 放棄', cls: 'bg-red-50 text-red-500' },
 }
 
 interface Props {
@@ -49,16 +49,14 @@ export default function InventoryTable({ products, onSold, onSave, onDelete }: P
   const [soldQty, setSoldQty]       = useState(1)
 
   function startEdit(p: any) {
-    setEditingId(p.id)
+    setEditingId(editingId === p.id ? null : p.id)
     setForm(initForm(p))
     setSoldId(null)
   }
 
-  function cancelEdit() { setEditingId(null) }
-
   async function confirmSave(p: any) {
     setSaving(true)
-    const edits: Record<string, any> = {
+    await onSave(p.id, {
       ai_suggested_name: form.ai_suggested_name || null,
       product_code:      form.product_code,
       product_name:      form.product_name,
@@ -73,8 +71,7 @@ export default function InventoryTable({ products, onSold, onSave, onDelete }: P
       notes:             form.notes,
       supplier_copy:     form.supplier_copy,
       ad_copy:           form.ad_copy,
-    }
-    await onSave(p.id, edits)
+    })
     setSaving(false)
     setEditingId(null)
   }
@@ -84,9 +81,10 @@ export default function InventoryTable({ products, onSold, onSave, onDelete }: P
     setDeletingId(p.id)
     await onDelete(p.id)
     setDeletingId(null)
+    if (editingId === p.id) setEditingId(null)
   }
 
-  function set(key: string, val: string) { setForm(prev => ({ ...prev, [key]: val })) }
+  const set = (k: string, v: string) => setForm(prev => ({ ...prev, [k]: v }))
 
   if (products.length === 0) {
     return (
@@ -98,19 +96,20 @@ export default function InventoryTable({ products, onSold, onSave, onDelete }: P
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[960px]">
+    <div className="w-full overflow-x-auto">
+      <table className="w-full text-sm">
         <thead>
-          <tr className="bg-gray-50 border-b border-gray-100">
-            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase w-12"></th>
-            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">商品</th>
-            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">來源</th>
-            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">落地成本</th>
-            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">賣價</th>
-            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">毛利</th>
-            <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">庫存</th>
-            <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">戰略</th>
-            <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">操作</th>
+          <tr className="bg-gray-50 border-b border-gray-100 text-left">
+            <th className="px-3 py-3 w-12"></th>
+            <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide min-w-[200px]">商品</th>
+            <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-24">來源</th>
+            <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-28 text-right">原始成本</th>
+            <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-28 text-right">落地成本</th>
+            <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-28 text-right">賣價</th>
+            <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-28 text-right">毛利</th>
+            <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-20 text-center">庫存</th>
+            <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-20 text-center">戰略</th>
+            <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-28 text-center">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -118,180 +117,189 @@ export default function InventoryTable({ products, onSold, onSave, onDelete }: P
             const profit = p.my_selling_price && p.total_cost_with_handling
               ? p.my_selling_price - p.total_cost_with_handling : null
             const margin = profit !== null && p.my_selling_price
-              ? (profit / p.my_selling_price * 100) : null
+              ? profit / p.my_selling_price * 100 : null
             const strategy   = p.strategy_tag ? STRATEGY_CONFIG[p.strategy_tag] : null
             const name       = p.ai_suggested_name || p.product_name || '未命名'
             const isEditing  = editingId === p.id
-            const marginColor = margin === null ? '' : margin >= 30 ? 'text-green-600' : margin < 0 ? 'text-red-500' : 'text-amber-500'
+            const marginCls  = margin === null ? 'text-gray-400' : margin >= 30 ? 'text-green-600' : margin < 0 ? 'text-red-500' : 'text-amber-500'
             const currency   = CURRENCY_LABEL[p.source] ?? 'JPY'
 
             return (
-              <tr key={p.id} className={`border-b border-gray-50 ${isEditing ? 'align-top bg-blue-50/20' : 'hover:bg-gray-50/50 transition-colors'}`}>
-                {/* Thumbnail */}
-                <td className="px-4 py-3">
-                  <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
-                    {p.image_url
-                      ? <img src={p.image_url} alt={name} className="w-full h-full object-cover" />
-                      : <div className="w-full h-full flex items-center justify-center text-lg">👗</div>
-                    }
-                  </div>
-                </td>
-
-                {/* Name — edit: ai_suggested_name, product_code, product_name */}
-                <td className="px-4 py-3 max-w-[220px]">
-                  {isEditing ? (
-                    <div className="space-y-1.5">
-                      <input value={form.ai_suggested_name} onChange={e => set('ai_suggested_name', e.target.value)}
-                        placeholder="AI販售名" className={inputCls} />
-                      <input value={form.product_code} onChange={e => set('product_code', e.target.value)}
-                        placeholder="商品編號" className={inputCls} />
-                      <input value={form.product_name} onChange={e => set('product_name', e.target.value)}
-                        placeholder="品名原文" className={inputCls} />
+              <>
+                {/* ── Main row ─────────────────────────────────────── */}
+                <tr
+                  key={p.id}
+                  className={`border-b border-gray-50 transition-colors ${isEditing ? 'bg-blue-50/30' : 'hover:bg-gray-50/60'}`}
+                >
+                  <td className="px-3 py-2.5">
+                    <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
+                      {p.image_url
+                        ? <img src={p.image_url} alt={name} className="w-full h-full object-cover" />
+                        : <div className="w-full h-full flex items-center justify-center text-base">👗</div>}
                     </div>
-                  ) : (
-                    <>
-                      <p className="text-sm font-medium text-gray-800 truncate">{name}</p>
-                      <p className="text-xs text-gray-400">{p.product_code || '—'}</p>
-                    </>
-                  )}
-                </td>
-
-                {/* Source */}
-                <td className="px-4 py-3">
-                  <span className="text-sm text-gray-600">{SOURCE_LABEL[p.source] ?? p.source}</span>
-                  {isEditing && (
-                    <div className="mt-2 space-y-1.5">
-                      <p className="text-xs text-gray-400 mt-1">原始成本 ({currency})</p>
-                      <input type="number" value={form.original_cost} onChange={e => set('original_cost', e.target.value)} className={inputCls} />
-                      <p className="text-xs text-gray-400">重量 (g)</p>
-                      <input type="number" value={form.weight_g} onChange={e => set('weight_g', e.target.value)} className={inputCls} />
-                      <p className="text-xs text-gray-400">包裝費 (NT$)</p>
-                      <input type="number" value={form.packaging_fee} onChange={e => set('packaging_fee', e.target.value)} className={inputCls} />
-                      <p className="text-xs text-gray-400">服務費 (%)</p>
-                      <input type="number" value={form.service_fee_pct} onChange={e => set('service_fee_pct', e.target.value)} className={inputCls} />
-                      <div className="text-xs text-gray-400 bg-gray-50 rounded-lg p-1.5 space-y-0.5">
-                        <p>台幣成本: <span className="text-gray-600">NT${p.twd_cost?.toFixed(0)}</span></p>
-                        <p>運費: <span className="text-gray-600">NT${p.shipping_fee?.toFixed(0)}</span></p>
-                        <p className="font-medium text-gray-600">落地含手續費: NT${p.total_cost_with_handling?.toFixed(0)}</p>
-                        <p className="text-gray-300 text-[10px]">※ 系統重新計算後更新</p>
-                      </div>
-                    </div>
-                  )}
-                </td>
-
-                {/* Cost (read-only) */}
-                <td className="px-4 py-3 text-right">
-                  <span className="text-sm text-gray-700">NT${p.total_cost_with_handling?.toFixed(0)}</span>
-                  {isEditing && (
-                    <div className="mt-2 space-y-1.5 text-left">
-                      <p className="text-xs text-gray-400">我的賣價</p>
-                      <input type="number" value={form.my_selling_price} onChange={e => set('my_selling_price', e.target.value)} className={inputCls} />
-                      <p className="text-xs text-gray-400">庫存數量</p>
-                      <input type="number" value={form.stock_quantity} onChange={e => set('stock_quantity', e.target.value)} className={inputCls} />
-                      <p className="text-xs text-gray-400">已售數量</p>
-                      <input type="number" value={form.sold_quantity} onChange={e => set('sold_quantity', e.target.value)} className={inputCls} />
-                    </div>
-                  )}
-                </td>
-
-                {/* Price */}
-                <td className="px-4 py-3 text-right">
-                  <span className="text-sm font-semibold text-gray-800">
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <p className="font-medium text-gray-800 leading-snug">{name}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{p.product_code || '—'}</p>
+                  </td>
+                  <td className="px-3 py-2.5 text-gray-600">{SOURCE_LABEL[p.source] ?? p.source}</td>
+                  <td className="px-3 py-2.5 text-right text-gray-500">
+                    {p.original_cost} <span className="text-xs">{currency}</span>
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-medium text-gray-700">
+                    NT${p.total_cost_with_handling?.toFixed(0) ?? '—'}
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-semibold text-gray-800">
                     {p.my_selling_price ? `NT$${p.my_selling_price.toLocaleString()}` : <span className="text-gray-300">—</span>}
-                  </span>
-                  {isEditing && (
-                    <div className="mt-2 space-y-1.5 text-left">
-                      <p className="text-xs text-gray-400">戰略</p>
-                      <select value={form.strategy_tag} onChange={e => set('strategy_tag', e.target.value)} className={inputCls}>
-                        <option value="">—</option>
-                        <option value="profit">💰 利潤品</option>
-                        <option value="lead">📣 引流品</option>
-                        <option value="skip">⛔ 放棄</option>
-                      </select>
-                      <p className="text-xs text-gray-400">備註</p>
-                      <textarea value={form.notes} onChange={e => set('notes', e.target.value)} rows={2} className={inputCls + ' resize-none'} />
-                    </div>
-                  )}
-                </td>
-
-                {/* Margin */}
-                <td className="px-4 py-3 text-right">
-                  {profit !== null && margin !== null ? (
-                    <div>
-                      <p className={`text-sm font-semibold ${marginColor}`}>NT${profit.toFixed(0)}</p>
-                      <p className={`text-xs ${marginColor} opacity-70`}>{margin.toFixed(1)}%</p>
-                    </div>
-                  ) : <span className="text-gray-300 text-sm">—</span>}
-                  {isEditing && (
-                    <div className="mt-2 text-left space-y-1.5">
-                      <p className="text-xs text-gray-400">供應商文案</p>
-                      <textarea value={form.supplier_copy} onChange={e => set('supplier_copy', e.target.value)} rows={3} className={inputCls + ' resize-none'} />
-                    </div>
-                  )}
-                </td>
-
-                {/* Stock */}
-                <td className="px-4 py-3 text-center">
-                  <span className={`text-sm font-semibold ${p.stock_status === 'sold_out' ? 'text-red-400' : p.stock_status === 'low_stock' ? 'text-amber-500' : 'text-gray-700'}`}>
-                    {p.remaining_stock}
-                  </span>
-                  <span className="text-xs text-gray-400 ml-0.5">件</span>
-                  {isEditing && (
-                    <div className="mt-2 text-left space-y-1.5">
-                      <p className="text-xs text-gray-400">廣告文案</p>
-                      <textarea value={form.ad_copy} onChange={e => set('ad_copy', e.target.value)} rows={5} className={inputCls + ' resize-none'} />
-                    </div>
-                  )}
-                </td>
-
-                {/* Strategy */}
-                <td className="px-4 py-3 text-center">
-                  {strategy
-                    ? <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${strategy.cls}`}>{strategy.label}</span>
-                    : <span className="text-gray-300 text-xs">—</span>}
-                </td>
-
-                {/* Actions */}
-                <td className="px-4 py-3 text-center">
-                  {isEditing ? (
-                    <div className="flex flex-col gap-1.5 items-center">
-                      <button
-                        onClick={() => confirmSave(p)}
-                        disabled={saving}
-                        className="w-16 text-xs text-white bg-pink-500 hover:bg-pink-600 px-2 py-1.5 rounded-lg font-medium disabled:opacity-50"
-                      >{saving ? '…' : '儲存'}</button>
-                      <button onClick={cancelEdit} className="w-16 text-xs text-gray-500 bg-gray-100 hover:bg-gray-200 px-2 py-1.5 rounded-lg">取消</button>
-                      <button
-                        onClick={() => confirmDelete(p)}
-                        disabled={deletingId === p.id}
-                        className="w-16 text-xs text-red-400 bg-red-50 hover:bg-red-100 px-2 py-1.5 rounded-lg disabled:opacity-50"
-                      >{deletingId === p.id ? '…' : '刪除'}</button>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-1.5 items-center">
+                  </td>
+                  <td className="px-3 py-2.5 text-right">
+                    {profit !== null ? (
+                      <div>
+                        <p className={`font-semibold ${marginCls}`}>NT${profit.toFixed(0)}</p>
+                        <p className={`text-xs ${marginCls} opacity-70`}>{margin!.toFixed(1)}%</p>
+                      </div>
+                    ) : <span className="text-gray-300">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5 text-center">
+                    <span className={`font-semibold ${p.stock_status === 'sold_out' ? 'text-red-400' : p.stock_status === 'low_stock' ? 'text-amber-500' : 'text-gray-700'}`}>
+                      {p.remaining_stock}
+                    </span>
+                    <span className="text-xs text-gray-400 ml-0.5">件</span>
+                  </td>
+                  <td className="px-3 py-2.5 text-center">
+                    {strategy
+                      ? <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${strategy.cls}`}>{strategy.label}</span>
+                      : <span className="text-gray-300 text-xs">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5 text-center">
+                    <div className="flex items-center justify-center gap-1.5">
                       {soldId === p.id ? (
-                        <div className="flex items-center gap-1">
+                        <>
                           <button onClick={() => setSoldQty(v => Math.max(1, v - 1))} className="w-5 h-5 rounded bg-gray-100 text-xs hover:bg-gray-200">−</button>
-                          <span className="text-sm w-5 text-center font-medium">{soldQty}</span>
+                          <span className="text-sm w-4 text-center font-medium">{soldQty}</span>
                           <button onClick={() => setSoldQty(v => Math.min(p.remaining_stock, v + 1))} className="w-5 h-5 rounded bg-gray-100 text-xs hover:bg-gray-200">+</button>
-                          <button onClick={() => { onSold(p.id, soldQty); setSoldId(null) }} className="text-xs text-white bg-pink-500 px-2 py-0.5 rounded-lg ml-1">✓</button>
-                          <button onClick={() => setSoldId(null)} className="text-xs text-gray-400">✕</button>
-                        </div>
+                          <button onClick={() => { onSold(p.id, soldQty); setSoldId(null) }} className="text-xs text-white bg-pink-500 px-2 py-0.5 rounded-lg">✓</button>
+                          <button onClick={() => setSoldId(null)} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
+                        </>
                       ) : (
-                        <button
-                          onClick={() => { setSoldId(p.id); setSoldQty(1) }}
-                          disabled={p.remaining_stock === 0}
-                          className="text-xs text-pink-600 hover:text-pink-700 font-medium disabled:text-gray-300 disabled:cursor-not-allowed"
-                        >出貨</button>
+                        <button onClick={() => { setSoldId(p.id); setSoldQty(1) }} disabled={p.remaining_stock === 0}
+                          className="text-xs text-pink-500 hover:text-pink-700 font-medium disabled:text-gray-300 disabled:cursor-not-allowed px-2 py-1 rounded hover:bg-pink-50">
+                          出貨
+                        </button>
                       )}
-                      <button
-                        onClick={() => startEdit(p)}
-                        className="text-xs text-blue-600 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded-lg font-medium transition-colors"
-                      >編輯</button>
+                      <button onClick={() => startEdit(p)}
+                        className={`text-xs font-medium px-2 py-1 rounded transition-colors ${isEditing ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                        {isEditing ? '收起' : '編輯'}
+                      </button>
                     </div>
-                  )}
-                </td>
-              </tr>
+                  </td>
+                </tr>
+
+                {/* ── Edit panel (full-width row) ───────────────────── */}
+                {isEditing && (
+                  <tr key={`${p.id}-edit`} className="bg-gray-50/80 border-b-2 border-blue-100">
+                    <td colSpan={10} className="px-6 py-5">
+                      <div className="grid grid-cols-4 gap-6">
+
+                        {/* Col 1: 商品資料 */}
+                        <div className="space-y-3">
+                          <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">商品資料</h4>
+                          <Field label="AI 販售名">
+                            <input value={form.ai_suggested_name} onChange={e => set('ai_suggested_name', e.target.value)} className={ic} />
+                          </Field>
+                          <Field label="商品編號">
+                            <input value={form.product_code} onChange={e => set('product_code', e.target.value)} className={ic} />
+                          </Field>
+                          <Field label="品名（原文）">
+                            <input value={form.product_name} onChange={e => set('product_name', e.target.value)} className={ic} />
+                          </Field>
+                          <Field label="戰略定位">
+                            <select value={form.strategy_tag} onChange={e => set('strategy_tag', e.target.value)} className={ic}>
+                              <option value="">— 未設定</option>
+                              <option value="profit">💰 利潤品</option>
+                              <option value="lead">📣 引流品</option>
+                              <option value="skip">⛔ 放棄</option>
+                            </select>
+                          </Field>
+                          <Field label="備註">
+                            <textarea value={form.notes} onChange={e => set('notes', e.target.value)} rows={3} className={ic + ' resize-none'} />
+                          </Field>
+                        </div>
+
+                        {/* Col 2: 成本 */}
+                        <div className="space-y-3">
+                          <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">成本資料</h4>
+                          <Field label={`原始成本 (${currency})`}>
+                            <input type="number" value={form.original_cost} onChange={e => set('original_cost', e.target.value)} className={ic} />
+                          </Field>
+                          <Field label="重量 (g)">
+                            <input type="number" value={form.weight_g} onChange={e => set('weight_g', e.target.value)} className={ic} />
+                          </Field>
+                          <Field label="包裝費 (NT$)">
+                            <input type="number" value={form.packaging_fee} onChange={e => set('packaging_fee', e.target.value)} className={ic} />
+                          </Field>
+                          <Field label="服務費 (%)">
+                            <input type="number" value={form.service_fee_pct} onChange={e => set('service_fee_pct', e.target.value)} className={ic} />
+                          </Field>
+                          <div className="bg-white rounded-xl border border-gray-100 p-3 text-xs space-y-1.5 text-gray-500">
+                            <p className="font-semibold text-gray-400 mb-1">系統計算（儲存後更新）</p>
+                            <div className="flex justify-between"><span>台幣成本</span><span className="font-medium text-gray-700">NT${p.twd_cost?.toFixed(0)}</span></div>
+                            <div className="flex justify-between"><span>運費</span><span className="font-medium text-gray-700">NT${p.shipping_fee?.toFixed(0)}</span></div>
+                            <div className="flex justify-between font-semibold text-gray-600 border-t pt-1.5"><span>落地含手續費</span><span>NT${p.total_cost_with_handling?.toFixed(0)}</span></div>
+                          </div>
+                        </div>
+
+                        {/* Col 3: 庫存 / 定價 */}
+                        <div className="space-y-3">
+                          <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">庫存 / 定價</h4>
+                          <Field label="我的賣價 (NT$)">
+                            <input type="number" value={form.my_selling_price} onChange={e => set('my_selling_price', e.target.value)} className={ic} />
+                          </Field>
+                          <Field label="庫存數量">
+                            <input type="number" value={form.stock_quantity} onChange={e => set('stock_quantity', e.target.value)} className={ic} />
+                          </Field>
+                          <Field label="已售數量">
+                            <input type="number" value={form.sold_quantity} onChange={e => set('sold_quantity', e.target.value)} className={ic} />
+                          </Field>
+                          <Field label="供應商文案">
+                            <textarea value={form.supplier_copy} onChange={e => set('supplier_copy', e.target.value)} rows={6} className={ic + ' resize-none'} />
+                          </Field>
+                        </div>
+
+                        {/* Col 4: 廣告文案 */}
+                        <div className="space-y-3">
+                          <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">廣告文案</h4>
+                          <textarea
+                            value={form.ad_copy}
+                            onChange={e => set('ad_copy', e.target.value)}
+                            rows={14}
+                            className={ic + ' resize-none h-full min-h-[200px]'}
+                            placeholder="廣告文案…"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="flex items-center gap-3 mt-5 pt-4 border-t border-gray-200">
+                        <button onClick={() => confirmSave(p)} disabled={saving}
+                          className="px-6 py-2 bg-pink-500 hover:bg-pink-600 text-white text-sm font-semibold rounded-xl disabled:opacity-50 transition-colors">
+                          {saving ? '儲存中…' : '儲存'}
+                        </button>
+                        <button onClick={() => setEditingId(null)}
+                          className="px-5 py-2 bg-white border border-gray-200 text-gray-600 text-sm rounded-xl hover:bg-gray-50 transition-colors">
+                          取消
+                        </button>
+                        <div className="ml-auto">
+                          <button onClick={() => confirmDelete(p)} disabled={deletingId === p.id}
+                            className="px-4 py-2 text-red-400 hover:text-red-600 text-sm hover:bg-red-50 rounded-xl transition-colors disabled:opacity-50">
+                            {deletingId === p.id ? '刪除中…' : '🗑 刪除此商品'}
+                          </button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </>
             )
           })}
         </tbody>
@@ -300,4 +308,13 @@ export default function InventoryTable({ products, onSold, onSave, onDelete }: P
   )
 }
 
-const inputCls = 'w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-pink-300 bg-white'
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-xs text-gray-400 mb-1">{label}</p>
+      {children}
+    </div>
+  )
+}
+
+const ic = 'w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 outline-none focus:border-pink-300 bg-white transition-colors'

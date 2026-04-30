@@ -155,13 +155,22 @@ export default function InventoryPage() {
     return true
   }), [products, sourceFilter, strategyFilter, stockFilter, search])
 
-  const stats = useMemo(() => ({
-    total:      products.length,
-    totalStock: products.reduce((s, p) => s + p.remaining_stock, 0),
-    lowStock:   products.filter(p => p.stock_status === 'low_stock').length,
-    soldOut:    products.filter(p => p.stock_status === 'sold_out').length,
-    revenue:    products.reduce((s, p) => s + (p.my_selling_price ?? 0) * p.sold_quantity, 0),
-  }), [products])
+  const stats = useMemo(() => {
+    const profitCount = products.filter(p => p.strategy_tag === 'profit').length
+    const leadCount   = products.filter(p => p.strategy_tag === 'lead').length
+    const tagged      = profitCount + leadCount
+    return {
+      total:        products.length,
+      totalStock:   products.reduce((s, p) => s + p.remaining_stock, 0),
+      lowStock:     products.filter(p => p.stock_status === 'low_stock').length,
+      soldOut:      products.filter(p => p.stock_status === 'sold_out').length,
+      revenue:      products.reduce((s, p) => s + (p.my_selling_price ?? 0) * p.sold_quantity, 0),
+      profitCount,
+      leadCount,
+      profitPct:    tagged > 0 ? Math.round(profitCount / tagged * 100) : null,
+      leadPct:      tagged > 0 ? Math.round(leadCount   / tagged * 100) : null,
+    }
+  }, [products])
 
   // ── Desktop layout ──────────────────────────────────────────────
   const desktopContent = (
@@ -184,11 +193,15 @@ export default function InventoryPage() {
       </div>
 
       {/* Stats cards */}
-      <div className="grid grid-cols-4 gap-4">
-        <StatCard label="商品款數" value={String(stats.total)} />
-        <StatCard label="在庫件數" value={String(stats.totalStock)} />
-        <StatCard label="低庫存警示" value={String(stats.lowStock)} warn={stats.lowStock > 0} onClick={stats.lowStock > 0 ? () => setStockFilter('low_stock') : undefined} />
-        <StatCard label="已售完" value={String(stats.soldOut)} warn={stats.soldOut > 0} onClick={stats.soldOut > 0 ? () => setStockFilter('sold_out') : undefined} />
+      <div className="grid grid-cols-3 gap-4">
+        <StatCard label="商品款數" value={String(stats.total)} sub={`在庫 ${stats.totalStock} 件`} />
+        <StatCard label="低庫存警示" value={String(stats.lowStock)} warn={stats.lowStock > 0}
+          sub={stats.soldOut > 0 ? `已售完 ${stats.soldOut} 款` : undefined}
+          onClick={stats.lowStock > 0 ? () => setStockFilter('low_stock') : undefined} />
+        <StrategyCard profitCount={stats.profitCount} leadCount={stats.leadCount}
+          profitPct={stats.profitPct} leadPct={stats.leadPct}
+          onClickProfit={() => setStrategyFilter('profit')}
+          onClickLead={() => setStrategyFilter('lead')} />
       </div>
 
       {/* Filter toolbar */}
@@ -334,7 +347,7 @@ export default function InventoryPage() {
   )
 }
 
-function StatCard({ label, value, warn, onClick }: { label: string; value: string; warn?: boolean; onClick?: () => void }) {
+function StatCard({ label, value, sub, warn, onClick }: { label: string; value: string; sub?: string; warn?: boolean; onClick?: () => void }) {
   return (
     <div
       onClick={onClick}
@@ -342,6 +355,41 @@ function StatCard({ label, value, warn, onClick }: { label: string; value: strin
     >
       <p className="text-xs text-gray-500 mb-1">{label}</p>
       <p className={`text-2xl font-bold ${warn ? 'text-amber-500' : 'text-gray-800'}`}>{value}</p>
+      {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
+    </div>
+  )
+}
+
+function StrategyCard({ profitCount, leadCount, profitPct, leadPct, onClickProfit, onClickLead }: {
+  profitCount: number; leadCount: number; profitPct: number | null; leadPct: number | null
+  onClickProfit: () => void; onClickLead: () => void
+}) {
+  const total = profitCount + leadCount
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 p-4">
+      <p className="text-xs text-gray-500 mb-2">商品策略分佈</p>
+      {total === 0 ? (
+        <p className="text-sm text-gray-300">尚無戰略標籤</p>
+      ) : (
+        <>
+          <div className="flex rounded-full overflow-hidden h-2 mb-2.5">
+            {profitPct !== null && <div className="bg-green-400 transition-all" style={{ width: `${profitPct}%` }} />}
+            {leadPct   !== null && <div className="bg-blue-400 transition-all"  style={{ width: `${leadPct}%` }} />}
+          </div>
+          <div className="flex gap-3 text-xs">
+            <button onClick={onClickProfit} className="flex items-center gap-1 hover:text-green-700 transition-colors">
+              <span className="w-2 h-2 rounded-full bg-green-400 inline-block" />
+              <span className="font-semibold text-green-600">{profitCount}</span>
+              <span className="text-gray-400">利潤{profitPct !== null ? ` ${profitPct}%` : ''}</span>
+            </button>
+            <button onClick={onClickLead} className="flex items-center gap-1 hover:text-blue-700 transition-colors">
+              <span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />
+              <span className="font-semibold text-blue-600">{leadCount}</span>
+              <span className="text-gray-400">引流{leadPct !== null ? ` ${leadPct}%` : ''}</span>
+            </button>
+          </div>
+        </>
+      )}
     </div>
   )
 }

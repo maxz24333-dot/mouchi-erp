@@ -1,43 +1,19 @@
 'use client'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
-import type { Source, JapanSupplier, Settings } from '@/types'
-import { calcCost, calcExchangeRate, suggestStrategy } from '@/lib/cost'
+import type { SourceRow, Settings } from '@/types'
+import { calcCost, suggestStrategy } from '@/lib/cost'
 import ImageUploader from '@/components/ImageUploader'
 import SourceSelector from '@/components/SourceSelector'
 import CostResultCard from '@/components/CostResultCard'
 import QuantityPicker from '@/components/QuantityPicker'
 
 const DEFAULT_SETTINGS: Settings = {
-  thailand_shipping_per_kg: 160,
-  haido_shipping_per_kg: 280,
-  mdm_shipping_per_kg: 280,
-  sd_shipping_per_kg: 280,
-  other_shipping_per_kg: 280,
-  korea_shipping_per_kg: 165,
   default_service_fee_pct: 0.03,
   default_packaging_fee: 10,
   handling_fee_pct: 0.05,
   target_margin_pct: 0.4,
-  exchange_rate_buffer: 1.15,
-}
-
-const SHIPPING_KEY: Record<Source, keyof Settings> = {
-  thailand: 'thailand_shipping_per_kg',
-  haido:    'haido_shipping_per_kg',
-  mdm:      'mdm_shipping_per_kg',
-  sd:       'sd_shipping_per_kg',
-  other:    'other_shipping_per_kg',
-  korea:    'korea_shipping_per_kg',
-}
-
-const CURRENCY_LABEL: Record<Source, string> = {
-  thailand: 'THB',
-  haido:    'JPY',
-  mdm:      'JPY',
-  sd:       'JPY',
-  other:    'JPY',
-  korea:    'KRW',
+  exchange_rate_buffer: 1.05,
 }
 
 export default function EntryPage() {
@@ -46,10 +22,8 @@ export default function EntryPage() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
 
   // --- source ---
-  const [source, setSource]               = useState<Source>('thailand')
-  const [isJapanActive, setIsJapanActive] = useState(false)
-  const [japanSupplier, setJapanSupplier] = useState<JapanSupplier>('haido')
-  const [includeTax, setIncludeTax]       = useState(true)
+  const [sources, setSources]           = useState<SourceRow[]>([])
+  const [selectedSource, setSelectedSource] = useState<SourceRow | null>(null)
 
   // --- product info ---
   const [productCode, setProductCode] = useState('')
@@ -57,15 +31,15 @@ export default function EntryPage() {
   const [sellingName, setSellingName] = useState('')
 
   // --- cost inputs ---
-  const [originalCost, setOriginalCost]       = useState('')
-  const [weightG, setWeightG]                 = useState('')
-  const [shippingRateInput, setShippingRateInput] = useState('')  // NT$/kg override; blank = system default
-  const [packagingFee, setPackagingFee]       = useState('10')
-  const [serviceFeePct, setServiceFeePct]     = useState('')
+  const [originalCost, setOriginalCost]         = useState('')
+  const [weightG, setWeightG]                   = useState('')
+  const [shippingRateInput, setShippingRateInput] = useState('')
+  const [packagingFee, setPackagingFee]          = useState('10')
+  const [serviceFeePct, setServiceFeePct]        = useState('')
   const [includeServiceFee, setIncludeServiceFee] = useState(false)
 
   // --- pricing ---
-  const [supplierPriceLocal, setSupplierPriceLocal] = useState('')  // in local currency
+  const [supplierPriceLocal, setSupplierPriceLocal] = useState('')
   const [mySellingPrice, setMySellingPrice]          = useState('')
 
   // --- misc ---
@@ -89,37 +63,35 @@ export default function EntryPage() {
   const [isBranded, setIsBranded]     = useState(false)
 
   // --- remote data ---
-  const [rates, setRates]       = useState<{ THB: number; JPY: number } | null>(null)
-  const [ratesStale, setRatesStale] = useState(false)
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [dashboard, setDashboard] = useState<{
     month_revenue: number; month_profit: number
     total_stock: number; low_stock_count: number
   } | null>(null)
 
-  // --- copy / 文案 ---
+  // --- copy ---
   const [copyOpen, setCopyOpen]         = useState(false)
   const [supplierCopy, setSupplierCopy] = useState('')
   const [adCopy, setAdCopy]             = useState('')
   const [copyLoading, setCopyLoading]   = useState(false)
 
-  // --- submit state ---
+  // --- submit ---
   const [submitting, setSubmitting] = useState(false)
   const [submitDone, setSubmitDone] = useState(false)
 
   useEffect(() => {
-    fetch('/api/exchange-rate')
-      .then(r => r.json())
-      .then(d => { setRates({ THB: d.THB, JPY: d.JPY }); setRatesStale(!!d.stale) })
-      .catch(() => {})
-    fetch('/api/settings')
-      .then(r => r.json())
-      .then(d => { if (d) setSettings(prev => ({ ...prev, ...d })) })
-      .catch(() => {})
-    fetch('/api/dashboard')
-      .then(r => r.json())
-      .then(d => { if (!d.error) setDashboard(d) })
-      .catch(() => {})
+    fetch('/api/sources').then(r => r.json()).then(d => {
+      if (Array.isArray(d) && d.length > 0) {
+        setSources(d)
+        setSelectedSource(d[0])
+      }
+    }).catch(() => {})
+    fetch('/api/settings').then(r => r.json()).then(d => {
+      if (d) setSettings(prev => ({ ...prev, ...d }))
+    }).catch(() => {})
+    fetch('/api/dashboard').then(r => r.json()).then(d => {
+      if (!d.error) setDashboard(d)
+    }).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -128,62 +100,48 @@ export default function EntryPage() {
 
   const autoFilledPrice = useRef(false)
 
-  // --- derived values ---
-  const rawRate       = rates ? calcExchangeRate(source, rates) : 0
-  const exchangeRate  = rawRate * settings.exchange_rate_buffer
-  const shippingPerKg = settings[SHIPPING_KEY[source]] as number
+  // --- derived ---
+  const rawRate      = selectedSource?.exchange_rate ?? 0
+  const exchangeRate = rawRate * settings.exchange_rate_buffer
+  const shippingPerKg = parseFloat(shippingRateInput) || selectedSource?.shipping_per_kg || 280
+  const weightNum    = parseFloat(weightG) || 0
+  const calcShipping = (weightNum / 1000) * shippingPerKg
 
-  const weightNum        = parseFloat(weightG) || 0
-  const effectiveRate    = shippingRateInput !== '' ? (parseFloat(shippingRateInput) || shippingPerKg) : shippingPerKg
-  const calcShipping     = (weightNum / 1000) * effectiveRate
-
-  const cost = originalCost && exchangeRate ? calcCost(
+  const cost = (originalCost && exchangeRate && selectedSource) ? calcCost(
     {
-      source,
-      originalCost:   parseFloat(originalCost),
-      weightG:        weightNum,
-      packagingFee:   parseFloat(packagingFee) || 10,
-      serviceFeePct:  includeServiceFee
+      originalCost:  parseFloat(originalCost),
+      weightG:       weightNum,
+      packagingFee:  parseFloat(packagingFee) || 10,
+      serviceFeePct: includeServiceFee
         ? (serviceFeePct !== '' ? parseFloat(serviceFeePct) / 100 : settings.default_service_fee_pct)
         : 0,
-      includeTax,
+      taxPct:         selectedSource.tax_pct,
       exchangeRate,
-      settings: { handling_fee_pct: settings.handling_fee_pct },
+      handlingFeePct: settings.handling_fee_pct,
     },
-    effectiveRate
+    shippingPerKg
   ) : null
 
-  // supplier price: local currency → TWD
-  const supplierPriceLocalNum = parseFloat(supplierPriceLocal) || 0
-  const supplierPriceTWD      = supplierPriceLocalNum > 0 ? supplierPriceLocalNum * exchangeRate : 0
-
-  const sellingPriceNum = parseFloat(mySellingPrice) || 0
-  const strategyTag     = cost && sellingPriceNum > 0
+  const supplierPriceTWD = (parseFloat(supplierPriceLocal) || 0) * exchangeRate
+  const sellingPriceNum  = parseFloat(mySellingPrice) || 0
+  const strategyTag      = cost && sellingPriceNum > 0
     ? suggestStrategy(cost.totalCostWithHandling, sellingPriceNum, marketAvg, settings.target_margin_pct)
     : null
+  const currLabel = selectedSource?.currency ?? '—'
 
-  const currLabel = CURRENCY_LABEL[source]
-
-  // Auto-fill suggested selling price once cost AND market data are both ready
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (autoFilledPrice.current) return
     if (!marketAvg || !cost || mySellingPrice) return
     const marginBased = cost.totalCostWithHandling / (1 - settings.target_margin_pct)
     const marketBased = marketAvg * marketMultiplier
     const suggested = Math.ceil(Math.max(marketBased, marginBased) / 50) * 50
-    if (suggested > 0) {
-      setMySellingPrice(String(suggested))
-      autoFilledPrice.current = true
-    }
+    if (suggested > 0) { setMySellingPrice(String(suggested)); autoFilledPrice.current = true }
   }, [marketAvg, cost, marketMultiplier])
 
-  // --- handlers ---
   const runAI = useCallback(async (file: File) => {
+    if (!selectedSource) return
     setAiLoading(true)
-    setAiName(null)
-    setSellingName('')
-    autoFilledPrice.current = false
+    setAiName(null); setSellingName(''); autoFilledPrice.current = false
     setMarketLow(null); setMarketHigh(null); setMarketAvg(null)
     setMarketStage(null); setMarketStageAdvice(null); setMarketMultiplier(1.0)
     setEcommerceCount(0)
@@ -194,147 +152,109 @@ export default function EntryPage() {
       formData.append('image', file)
       const priceForm = new FormData()
       priceForm.append('image', file)
-      priceForm.append('source', source)
+      priceForm.append('source', selectedSource.id)
+      priceForm.append('search_country', selectedSource.search_country)
       const [nameRes, priceRes] = await Promise.allSettled([
         fetch('/api/ai-name', { method: 'POST', body: formData }),
         fetch('/api/market-price', { method: 'POST', body: priceForm }),
       ])
       if (nameRes.status === 'fulfilled' && nameRes.value.ok) {
-        const d = await nameRes.value.json()
-        setAiName(d.name)
+        const d = await nameRes.value.json(); setAiName(d.name)
       }
       if (priceRes.status === 'fulfilled' && priceRes.value.ok) {
         const d = await priceRes.value.json()
         setMarketLow(d.low); setMarketHigh(d.high); setMarketAvg(d.avg)
-        setMarketStage(d.stage ?? null)
-        setMarketStageAdvice(d.stageAdvice ?? null)
+        setMarketStage(d.stage ?? null); setMarketStageAdvice(d.stageAdvice ?? null)
         setMarketMultiplier(d.suggestedMultiplier ?? 1.0)
         setEcommerceCount(d.ecommerceCount ?? 0)
-        setSocialLow(d.socialLow ?? null)
-        setSocialHigh(d.socialHigh ?? null)
-        setSocialAvg(d.socialAvg ?? null)
-        setSocialCount(d.socialCount ?? 0)
+        setSocialLow(d.socialLow ?? null); setSocialHigh(d.socialHigh ?? null)
+        setSocialAvg(d.socialAvg ?? null); setSocialCount(d.socialCount ?? 0)
         setIsBranded(d.isBranded ?? false)
       }
-    } finally {
-      setAiLoading(false)
-    }
-  }, [source])
+    } finally { setAiLoading(false) }
+  }, [selectedSource])
 
-  function handleImage(file: File, url: string) {
-    setImageFile(file); setPreviewUrl(url); runAI(file)
-  }
-
-  function handleSourceChange(s: Source, japan: boolean, js: JapanSupplier) {
-    setSource(s); setIsJapanActive(japan); setJapanSupplier(js)
-  }
+  function handleImage(file: File, url: string) { setImageFile(file); setPreviewUrl(url); runAI(file) }
 
   async function generateCopy() {
     setCopyLoading(true)
     try {
       const body: Record<string, unknown> = {
         productName: sellingName || aiName || productName,
-        source,
+        source: selectedSource?.id,
         supplierCopy,
       }
-      if (imageFile) {
-        body.image = await toBase64(imageFile)
-        body.imageMimeType = imageFile.type
-      }
-      const res = await fetch('/api/copy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (res.ok) {
-        const d = await res.json()
-        setAdCopy(d.copy)
-      }
-    } finally {
-      setCopyLoading(false)
-    }
+      if (imageFile) { body.image = await toBase64(imageFile); body.imageMimeType = imageFile.type }
+      const res = await fetch('/api/copy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      if (res.ok) { const d = await res.json(); setAdCopy(d.copy) }
+    } finally { setCopyLoading(false) }
   }
 
   async function handleSubmit() {
-    if (!cost) return
+    if (!cost || !selectedSource) return
     setSubmitting(true)
     try {
       const body = {
-        image:            imageFile ? await toBase64(imageFile) : null,
-        image_mime_type:  imageFile?.type || 'image/jpeg',
-        source,
-        product_code:     productCode,
-        product_name:     productName,
-        original_cost:    parseFloat(originalCost),
-        weight_g:         weightNum,
-        packaging_fee:    parseFloat(packagingFee) || 10,
-        service_fee_pct:  serviceFeePct !== '' ? parseFloat(serviceFeePct) / 100 : settings.default_service_fee_pct,
-        include_tax:      includeTax,
+        image:           imageFile ? await toBase64(imageFile) : null,
+        image_mime_type: imageFile?.type || 'image/jpeg',
+        source:          selectedSource.id,
+        product_code:    productCode,
+        product_name:    productName,
+        original_cost:   parseFloat(originalCost),
+        weight_g:        weightNum,
+        packaging_fee:   parseFloat(packagingFee) || 10,
+        service_fee_pct: serviceFeePct !== '' ? parseFloat(serviceFeePct) / 100 : settings.default_service_fee_pct,
+        include_tax:     selectedSource.tax_pct > 0,
         include_handling: true,
-        exchange_rate:    exchangeRate,
-        twd_cost:         cost.twdCost,
-        shipping_fee:     cost.shippingFee,
-        total_cost:       cost.totalCost,
+        exchange_rate:   exchangeRate,
+        twd_cost:        cost.twdCost,
+        shipping_fee:    cost.shippingFee,
+        total_cost:      cost.totalCost,
         total_cost_with_handling: cost.totalCostWithHandling,
         ai_suggested_name:        sellingName || aiName,
         supplier_suggested_price: supplierPriceTWD || null,
-        market_price_low:   marketLow,
-        market_price_high:  marketHigh,
-        market_price_avg:   marketAvg,
-        my_selling_price:   sellingPriceNum || null,
-        profit_margin:      sellingPriceNum > 0 ? cost.profitMargin(sellingPriceNum) : null,
-        strategy_tag:       strategyTag,
-        stock_quantity:     quantity,
+        market_price_low:  marketLow,
+        market_price_high: marketHigh,
+        market_price_avg:  marketAvg,
+        my_selling_price:  sellingPriceNum || null,
+        profit_margin:     sellingPriceNum > 0 ? cost.profitMargin(sellingPriceNum) : null,
+        strategy_tag:      strategyTag,
+        stock_quantity:    quantity,
         notes,
         supplier_copy: supplierCopy,
         ad_copy:       adCopy,
       }
-      const res = await fetch('/api/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (res.ok) {
-        setSubmitDone(true)
-        setTimeout(() => { setSubmitDone(false); resetForm() }, 1500)
-      }
-    } finally {
-      setSubmitting(false)
-    }
+      const res = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      if (res.ok) { setSubmitDone(true); setTimeout(() => { setSubmitDone(false); resetForm() }, 1500) }
+    } finally { setSubmitting(false) }
   }
 
   function resetForm() {
     setImageFile(null); setPreviewUrl(null)
     setProductCode(''); setProductName(''); setSellingName('')
     setOriginalCost(''); setWeightG(''); setShippingRateInput('')
-    setPackagingFee('10'); setShippingRateInput(''); setServiceFeePct(''); setIncludeServiceFee(false)
+    setPackagingFee('10'); setServiceFeePct(''); setIncludeServiceFee(false)
     setSupplierPriceLocal(''); setMySellingPrice('')
     setQuantity(0); setNotes('')
     setAiName(null); setMarketLow(null); setMarketHigh(null); setMarketAvg(null)
     setMarketStage(null); setMarketStageAdvice(null); setMarketMultiplier(1.0)
     setEcommerceCount(0); setSocialLow(null); setSocialHigh(null); setSocialAvg(null); setSocialCount(0)
-    setIsBranded(false)
-    setSupplierCopy(''); setAdCopy(''); setCopyOpen(false)
+    setIsBranded(false); setSupplierCopy(''); setAdCopy(''); setCopyOpen(false)
     autoFilledPrice.current = false
   }
 
-  // ── Shared JSX blocks ──────────────────────────────────────────
+  // ── Shared blocks ──────────────────────────────────────────────────
+
+  const rateInfo = selectedSource?.exchange_rate
+    ? `1 ${selectedSource.currency} ≈ NT$${(selectedSource.exchange_rate * settings.exchange_rate_buffer).toFixed(4)}`
+    : selectedSource ? `⚠️ ${selectedSource.currency} 匯率未設定，請至設定頁更新` : ''
 
   const sourceBlock = (
     <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
       <p className="text-xs text-gray-500 font-medium">來源</p>
-      <SourceSelector source={source} isJapanActive={isJapanActive} japanSupplier={japanSupplier} onChange={handleSourceChange} />
-      {source === 'korea' && (
-        <div className="flex gap-2">
-          <button type="button" onClick={() => setIncludeTax(false)}
-            className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all ${!includeTax ? 'bg-pink-400 text-white' : 'bg-gray-100 text-gray-600'}`}>
-            未稅價
-          </button>
-          <button type="button" onClick={() => setIncludeTax(true)}
-            className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all ${includeTax ? 'bg-pink-400 text-white' : 'bg-gray-100 text-gray-600'}`}>
-            含稅價 ×1.1
-          </button>
-        </div>
+      <SourceSelector sources={sources} selectedId={selectedSource?.id ?? ''} onSelect={s => { setSelectedSource(s); autoFilledPrice.current = false }} />
+      {rateInfo && (
+        <p className={`text-xs ${selectedSource?.exchange_rate ? 'text-gray-400' : 'text-amber-500'}`}>{rateInfo}</p>
       )}
     </div>
   )
@@ -372,7 +292,7 @@ export default function EntryPage() {
         <div>
           <Field label="空運費率 (NT$/kg)">
             <input type="number" inputMode="numeric" value={shippingRateInput} onChange={e => setShippingRateInput(e.target.value)}
-              placeholder={String(shippingPerKg)} className={inputLgCls} />
+              placeholder={String(selectedSource?.shipping_per_kg ?? 280)} className={inputLgCls} />
           </Field>
           {weightNum > 0 && <p className="text-xs text-gray-400 mt-1">= NT${calcShipping.toFixed(0)}</p>}
         </div>
@@ -394,6 +314,11 @@ export default function EntryPage() {
             className={`w-full text-lg font-semibold border-b outline-none pb-1 bg-transparent transition-all ${includeServiceFee ? 'border-gray-200 focus:border-pink-400 text-gray-800' : 'border-gray-100 text-gray-300'}`} />
         </div>
       </div>
+      {selectedSource && selectedSource.tax_pct > 0 && (
+        <p className="text-xs text-gray-400 bg-gray-50 rounded-xl px-3 py-2">
+          稅率 {(selectedSource.tax_pct * 100).toFixed(0)}% 已自動套用（來源設定）
+        </p>
+      )}
     </div>
   )
 
@@ -433,47 +358,45 @@ export default function EntryPage() {
       {copyOpen && (
         <div className="px-4 pb-4 space-y-3 border-t border-gray-100">
           <div className="pt-3">
-            <label className="text-xs text-gray-400 block mb-1">廠商原文文案（選填，可貼上任何語言）</label>
+            <label className="text-xs text-gray-400 block mb-1">廠商原文文案（選填）</label>
             <textarea value={supplierCopy} onChange={e => setSupplierCopy(e.target.value)}
-              placeholder="可貼上泰文、日文、韓文原文…" rows={3}
+              placeholder="可貼上任何語言原文…" rows={3}
               className="w-full text-sm text-gray-700 bg-gray-50 rounded-xl px-3 py-2 outline-none resize-none" />
           </div>
           <button type="button" onClick={generateCopy} disabled={copyLoading || (!imageFile && !supplierCopy && !productName && !aiName)}
-            className="w-full py-2.5 rounded-xl text-sm font-medium transition-all bg-pink-50 text-pink-600 hover:bg-pink-100 disabled:opacity-40 disabled:cursor-not-allowed">
+            className="w-full py-2.5 rounded-xl text-sm font-medium bg-pink-50 text-pink-600 hover:bg-pink-100 disabled:opacity-40">
             {copyLoading ? '✨ AI 生成中…' : '✨ AI 生成文案'}
           </button>
-          {adCopy ? (
+          {adCopy && (
             <div>
               <label className="text-xs text-gray-400 block mb-1">生成文案（可直接編輯）</label>
-              <textarea value={adCopy} onChange={e => setAdCopy(e.target.value)}
-                rows={12}
+              <textarea value={adCopy} onChange={e => setAdCopy(e.target.value)} rows={12}
                 className="w-full text-sm text-gray-700 bg-gray-50 rounded-xl px-3 py-2 outline-none resize-none leading-relaxed" />
             </div>
-          ) : null}
+          )}
         </div>
       )}
     </div>
   )
 
   const submitBtn = (
-    <button type="button" onClick={handleSubmit} disabled={!cost || submitting}
+    <button type="button" onClick={handleSubmit} disabled={!cost || submitting || !selectedSource?.exchange_rate}
       className={`w-full py-4 rounded-2xl text-white font-bold text-base transition-all
-        ${submitDone ? 'bg-green-500' : cost ? 'bg-pink-500 shadow-lg shadow-pink-200' : 'bg-gray-200 text-gray-400'}`}>
+        ${submitDone ? 'bg-green-500' : cost && selectedSource?.exchange_rate ? 'bg-pink-500 shadow-lg shadow-pink-200' : 'bg-gray-200 text-gray-400'}`}>
       {submitDone ? '✓ 入庫成功！' : submitting ? '寫入中…' : quantity > 0 ? `一鍵入庫 × ${quantity}` : '選品紀錄（庫存 0）'}
     </button>
   )
 
-  // ── Desktop layout ──────────────────────────────────────────────
+  // ── Desktop layout ─────────────────────────────────────────────────
   const desktopLayout = (
     <div className="p-6">
-      {/* Page header */}
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-xl font-bold text-gray-900">新增選品</h1>
-          {rates && (
-            <p className={`text-sm mt-0.5 ${ratesStale ? 'text-amber-500' : 'text-gray-400'}`}>
-              ¥{(rates.JPY * settings.exchange_rate_buffer).toFixed(4)} / ฿{(rates.THB * settings.exchange_rate_buffer).toFixed(4)}
-              　×{settings.exchange_rate_buffer} 緩衝{ratesStale ? ' ⚠️' : ''}
+          {selectedSource?.exchange_rate && (
+            <p className="text-sm text-gray-400 mt-0.5">
+              1 {selectedSource.currency} ≈ NT${(selectedSource.exchange_rate * settings.exchange_rate_buffer).toFixed(4)}
+              　×{settings.exchange_rate_buffer} 緩衝
             </p>
           )}
         </div>
@@ -485,19 +408,10 @@ export default function EntryPage() {
           </div>
         )}
       </div>
-
-      {/* Two-column form */}
       <div className="grid grid-cols-5 gap-5">
-        {/* Left: form inputs */}
         <div className="col-span-3 space-y-4">
-          {sourceBlock}
-          {productBlock}
-          {costBlock}
-          {pricingBlock}
-          {copyBlock}
+          {sourceBlock}{productBlock}{costBlock}{pricingBlock}{copyBlock}
         </div>
-
-        {/* Right: image + results + submit */}
         <div className="col-span-2 space-y-4">
           <ImageUploader onImage={handleImage} previewUrl={previewUrl} loading={aiLoading} />
           {aiBlock}
@@ -513,7 +427,7 @@ export default function EntryPage() {
     </div>
   )
 
-  // ── Mobile layout ───────────────────────────────────────────────
+  // ── Mobile layout ──────────────────────────────────────────────────
   const mobileLayout = (
     <div className="min-h-screen pb-24">
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-gray-100 px-4 py-3 flex items-center justify-between">
@@ -522,16 +436,14 @@ export default function EntryPage() {
           <p className="text-xs text-gray-400">快速入庫</p>
         </div>
         <div className="flex items-center gap-3">
-          {rates && (
-            <div className={`text-xs text-right ${ratesStale ? 'text-amber-500' : 'text-gray-400'}`}>
-              <div>¥{(rates.JPY * settings.exchange_rate_buffer).toFixed(4)} / ฿{(rates.THB * settings.exchange_rate_buffer).toFixed(4)}</div>
-              <div className="text-gray-300">×{settings.exchange_rate_buffer}{ratesStale ? ' ⚠️' : ''}</div>
+          {selectedSource?.exchange_rate && (
+            <div className="text-xs text-right text-gray-400">
+              <div>1 {selectedSource.currency} ≈ NT${(selectedSource.exchange_rate * settings.exchange_rate_buffer).toFixed(4)}</div>
             </div>
           )}
           <Link href="/inventory" className="text-xs text-pink-500 font-medium">庫存 →</Link>
         </div>
       </header>
-
       <div className="px-4 py-4 space-y-3">
         {dashboard && (
           <div className="grid grid-cols-3 gap-2">
@@ -542,11 +454,7 @@ export default function EntryPage() {
         )}
         {sourceBlock}
         <ImageUploader onImage={handleImage} previewUrl={previewUrl} loading={aiLoading} compact />
-        {productBlock}
-        {costBlock}
-        {pricingBlock}
-        {aiBlock}
-        {copyBlock}
+        {productBlock}{costBlock}{pricingBlock}{aiBlock}{copyBlock}
         <QuantityPicker value={quantity} onChange={setQuantity} />
         <div className="bg-white rounded-2xl shadow-sm p-4">
           <label className="text-xs text-gray-400 block mb-1">備註</label>
@@ -554,7 +462,6 @@ export default function EntryPage() {
             className="w-full text-sm text-gray-700 outline-none resize-none bg-transparent" />
         </div>
       </div>
-
       <div className="fixed bottom-16 left-0 right-0 max-w-lg mx-auto px-4 pb-3 pt-3 bg-gradient-to-t from-[#f5f0eb] to-transparent">
         {submitBtn}
       </div>
@@ -570,19 +477,12 @@ export default function EntryPage() {
 }
 
 // ── helpers ──
-
 const inputCls   = 'w-full text-sm font-medium border-b border-gray-200 focus:border-pink-400 outline-none pb-1 bg-transparent'
 const inputLgCls = 'w-full text-lg font-semibold border-b border-gray-200 focus:border-pink-400 outline-none pb-1 bg-transparent'
 
 function Field({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="text-xs text-gray-400 block mb-1">{label}</label>
-      {children}
-    </div>
-  )
+  return <div><label className="text-xs text-gray-400 block mb-1">{label}</label>{children}</div>
 }
-
 function MiniStat({ label, value, pink, warn }: { label: string; value: string; pink?: boolean; warn?: boolean }) {
   return (
     <div className="bg-white rounded-xl border border-gray-100 px-4 py-2 text-center">
@@ -591,18 +491,14 @@ function MiniStat({ label, value, pink, warn }: { label: string; value: string; 
     </div>
   )
 }
-
 function StatCard({ label, value, accent, warn }: { label: string; value: string; accent?: boolean; warn?: boolean }) {
   return (
     <div className="bg-white rounded-xl shadow-sm p-3 text-center">
       <p className="text-xs text-gray-400 mb-0.5">{label}</p>
-      <p className={`text-sm font-bold ${accent ? 'text-pink-600' : warn ? 'text-amber-500' : 'text-gray-800'}`}>
-        {value}
-      </p>
+      <p className={`text-sm font-bold ${accent ? 'text-pink-600' : warn ? 'text-amber-500' : 'text-gray-800'}`}>{value}</p>
     </div>
   )
 }
-
 function toBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()

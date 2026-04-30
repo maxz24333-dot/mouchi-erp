@@ -1,14 +1,11 @@
-import type { Source, Settings } from '@/types'
-
 export interface CostInput {
-  source: Source
   originalCost: number
   weightG: number
   packagingFee: number
   serviceFeePct: number
-  includeTax: boolean
-  exchangeRate: number
-  settings: Pick<Settings, 'handling_fee_pct'>
+  taxPct: number        // from source.tax_pct (e.g. 0.1 for 10%)
+  exchangeRate: number  // already buffered (source.exchange_rate × buffer)
+  handlingFeePct: number
 }
 
 export interface CostResult {
@@ -22,17 +19,14 @@ export interface CostResult {
 }
 
 export function calcCost(input: CostInput, shippingPerKg: number): CostResult {
-  const { source, originalCost, weightG, packagingFee, serviceFeePct, includeTax, exchangeRate } = input
+  const { originalCost, weightG, packagingFee, serviceFeePct, taxPct, exchangeRate, handlingFeePct } = input
 
-  const taxMultiplier = getTaxMultiplier(source, includeTax)
-  const taxedCost = originalCost * taxMultiplier
+  const taxedCost    = originalCost * (1 + taxPct)
   const serviceFeeFC = originalCost * serviceFeePct
-  const twdCost = (taxedCost + serviceFeeFC) * exchangeRate
-
-  const shippingFee = (weightG / 1000) * shippingPerKg
-
-  const totalCost = twdCost + shippingFee + packagingFee
-  const totalCostWithHandling = totalCost * (1 + input.settings.handling_fee_pct)
+  const twdCost      = (taxedCost + serviceFeeFC) * exchangeRate
+  const shippingFee  = (weightG / 1000) * shippingPerKg
+  const totalCost    = twdCost + shippingFee + packagingFee
+  const totalCostWithHandling = totalCost * (1 + handlingFeePct)
 
   return {
     taxedCost,
@@ -44,19 +38,6 @@ export function calcCost(input: CostInput, shippingPerKg: number): CostResult {
     profitMargin: (sellingPrice: number) =>
       sellingPrice > 0 ? (sellingPrice - totalCostWithHandling) / sellingPrice : 0,
   }
-}
-
-function getTaxMultiplier(source: Source, includeTax: boolean): number {
-  if (source === 'korea') return includeTax ? 1.1 : 1
-  if (source === 'haido' || source === 'mdm' || source === 'sd' || source === 'other') return 1.1
-  return 1
-}
-
-export function calcExchangeRate(source: Source, rates: { THB: number; JPY: number }): number {
-  if (source === 'thailand') return rates.THB
-  if (source === 'haido' || source === 'mdm' || source === 'sd' || source === 'other') return rates.JPY
-  if (source === 'korea') return 1 / 40
-  return 1
 }
 
 export function suggestStrategy(

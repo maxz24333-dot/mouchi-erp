@@ -1,13 +1,6 @@
 'use client'
 import { useState, useRef } from 'react'
-
-const SOURCE_LABEL: Record<string, string> = {
-  thailand: '🇹🇭 泰國', haido: '🇯🇵 海度', mdm: '🇯🇵 MDM',
-  sd: '🇯🇵 SD', other: '📦 其他', korea: '🇰🇷 韓國',
-}
-const CURRENCY_LABEL: Record<string, string> = {
-  thailand: 'THB', haido: 'JPY', mdm: 'JPY', sd: 'JPY', other: 'JPY', korea: 'KRW',
-}
+import type { SourceRow } from '@/types'
 const STRATEGY_CONFIG = {
   lead:   { label: '📣 引流品', color: 'bg-blue-100 text-blue-700' },
   profit: { label: '💰 利潤品', color: 'bg-green-100 text-green-700' },
@@ -21,6 +14,7 @@ const STOCK_CONFIG = {
 
 interface Props {
   product: any
+  sourcesMap: Record<string, SourceRow>
   onSold: (id: string, qty: number) => void
   onSave: (id: string, edits: Record<string, any>) => Promise<void>
 }
@@ -49,7 +43,7 @@ function isDirty(form: Record<string, string>, product: any) {
   return Object.keys(orig).some(k => form[k] !== orig[k])
 }
 
-export default function ProductCard({ product, onSold, onSave }: Props) {
+export default function ProductCard({ product, sourcesMap, onSold, onSave }: Props) {
   const [form, setForm]         = useState<Record<string, string>>(() => initForm(product))
   const [saving, setSaving]     = useState(false)
   const [soldQty, setSoldQty]   = useState(1)
@@ -58,7 +52,9 @@ export default function ProductCard({ product, onSold, onSave }: Props) {
 
   const dirty    = isDirty(form, product)
   const name     = form.ai_suggested_name || form.product_name || '未命名商品'
-  const currency = CURRENCY_LABEL[product.source] ?? 'JPY'
+  const srcInfo  = sourcesMap[product.source]
+  const currency = srcInfo?.currency ?? product.source?.toUpperCase() ?? 'JPY'
+  const srcLabel = srcInfo?.label ?? product.source ?? '—'
   const strategy = form.strategy_tag ? STRATEGY_CONFIG[form.strategy_tag as keyof typeof STRATEGY_CONFIG] : null
   const stockClr = STOCK_CONFIG[product.stock_status as keyof typeof STOCK_CONFIG]?.color ?? 'text-gray-400'
 
@@ -121,7 +117,7 @@ export default function ProductCard({ product, onSold, onSave }: Props) {
             </select>
           </div>
           <div className="flex items-center gap-1 mt-0.5">
-            <span className="text-xs text-gray-400">{SOURCE_LABEL[product.source]}</span>
+            <span className="text-xs text-gray-400">{srcLabel}</span>
             <span className="text-xs text-gray-300">·</span>
             <input
               value={form.product_code}

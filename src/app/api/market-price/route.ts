@@ -202,20 +202,14 @@ async function shoppingSearch(query: string, serperKey: string, gl: string, minP
   } catch { return [] }
 }
 
-// ── 來源設定 ─────────────────────────────────────────────────────────
+// ── 來源設定（改為動態，從 form data 讀取） ────────────────────────────
 
-const SOURCE_GL: Record<string, string> = {
-  thailand: 'th',
-  haido: 'jp', mdm: 'jp', sd: 'jp',
-  korea: 'kr',
-  other: 'tw',
+const MIN_PRICE_BY_COUNTRY: Record<string, number> = {
+  jp: 350,
+  tw: 100,
 }
-
-const SOURCE_MIN_PRICE: Record<string, number> = {
-  thailand: 100,
-  haido: 350, mdm: 350, sd: 350,
-  korea: 100,
-  other: 100,
+function getMinPrice(gl: string): number {
+  return MIN_PRICE_BY_COUNTRY[gl] ?? 100
 }
 
 // ── 統計 ─────────────────────────────────────────────────────────────
@@ -265,9 +259,10 @@ export async function POST(req: NextRequest) {
     const file = formData.get('image') as File
     if (!file) return NextResponse.json({ error: 'No image' }, { status: 400 })
 
-    const source    = (formData.get('source') as string | null) ?? 'other'
-    const primaryGl = SOURCE_GL[source] ?? 'tw'
-    const minPrice  = SOURCE_MIN_PRICE[source] ?? 100
+    const searchCountry = (formData.get('search_country') as string | null)
+    const source        = (formData.get('source') as string | null) ?? 'other'
+    const primaryGl     = searchCountry ?? (source === 'thailand' ? 'th' : source === 'korea' ? 'kr' : source.startsWith('other') ? 'tw' : 'jp')
+    const minPrice      = getMinPrice(primaryGl)
 
     const bytes    = await file.arrayBuffer()
     const base64   = Buffer.from(bytes).toString('base64')

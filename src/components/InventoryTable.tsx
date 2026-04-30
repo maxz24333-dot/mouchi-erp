@@ -1,13 +1,6 @@
 'use client'
 import { useState, Fragment } from 'react'
-
-const SOURCE_LABEL: Record<string, string> = {
-  thailand: '🇹🇭 泰國', haido: '🇯🇵 海度', mdm: '🇯🇵 MDM',
-  sd: '🇯🇵 SD', other: '📦 其他', korea: '🇰🇷 韓國',
-}
-const CURRENCY_LABEL: Record<string, string> = {
-  thailand: 'THB', haido: 'JPY', mdm: 'JPY', sd: 'JPY', other: 'JPY', korea: 'KRW',
-}
+import type { SourceRow } from '@/types'
 const STRATEGY_CONFIG: Record<string, { label: string; cls: string }> = {
   lead:   { label: '📣 引流', cls: 'bg-blue-50 text-blue-600' },
   profit: { label: '💰 利潤', cls: 'bg-green-50 text-green-700' },
@@ -16,6 +9,7 @@ const STRATEGY_CONFIG: Record<string, { label: string; cls: string }> = {
 
 interface Props {
   products: any[]
+  sourcesMap: Record<string, SourceRow>
   onSold: (id: string, qty: number) => void
   onSave: (id: string, edits: Record<string, any>) => Promise<void>
   onDelete: (id: string) => Promise<void>
@@ -45,7 +39,7 @@ function isDirty(form: Record<string, string>, p: any) {
   return Object.keys(orig).some(k => form[k] !== orig[k])
 }
 
-export default function InventoryTable({ products, onSold, onSave, onDelete }: Props) {
+export default function InventoryTable({ products, sourcesMap, onSold, onSave, onDelete }: Props) {
   if (products.length === 0) {
     return (
       <div className="text-center py-20 text-gray-400">
@@ -74,7 +68,7 @@ export default function InventoryTable({ products, onSold, onSave, onDelete }: P
         </thead>
         <tbody>
           {products.map(p => (
-            <ProductRow key={p.id} product={p} onSold={onSold} onSave={onSave} onDelete={onDelete} />
+            <ProductRow key={p.id} product={p} sourcesMap={sourcesMap} onSold={onSold} onSave={onSave} onDelete={onDelete} />
           ))}
         </tbody>
       </table>
@@ -82,8 +76,9 @@ export default function InventoryTable({ products, onSold, onSave, onDelete }: P
   )
 }
 
-function ProductRow({ product: p, onSold, onSave, onDelete }: {
+function ProductRow({ product: p, sourcesMap, onSold, onSave, onDelete }: {
   product: any
+  sourcesMap: Record<string, SourceRow>
   onSold: (id: string, qty: number) => void
   onSave: (id: string, edits: Record<string, any>) => Promise<void>
   onDelete: (id: string) => Promise<void>
@@ -96,7 +91,9 @@ function ProductRow({ product: p, onSold, onSave, onDelete }: {
   const [soldOpen, setSoldOpen] = useState(false)
 
   const dirty    = isDirty(form, p)
-  const currency = CURRENCY_LABEL[p.source] ?? 'JPY'
+  const srcInfo  = sourcesMap[p.source]
+  const currency = srcInfo?.currency ?? p.source?.toUpperCase() ?? 'JPY'
+  const srcLabel = srcInfo?.label ?? p.source ?? '—'
   const strategy = form.strategy_tag ? STRATEGY_CONFIG[form.strategy_tag] : null
 
   const sellingPrice = parseFloat(form.my_selling_price) || null
@@ -172,7 +169,7 @@ function ProductRow({ product: p, onSold, onSave, onDelete }: {
         </td>
 
         {/* 來源 */}
-        <td className="px-3 py-2 text-gray-500 text-xs">{SOURCE_LABEL[p.source] ?? p.source}</td>
+        <td className="px-3 py-2 text-gray-500 text-xs">{srcLabel}</td>
 
         {/* 原始成本 */}
         <td className="px-3 py-2 text-right">

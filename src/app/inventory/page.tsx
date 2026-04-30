@@ -1,22 +1,12 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
+import type { SourceRow, Settings } from '@/types'
 import ProductCard from '@/components/ProductCard'
 import InventoryTable from '@/components/InventoryTable'
 
-type SourceFilter   = 'all' | 'thailand' | 'haido' | 'mdm' | 'sd' | 'other' | 'korea'
 type StrategyFilter = 'all' | 'lead' | 'profit' | 'skip'
 type StockFilter    = 'all' | 'in_stock' | 'low_stock' | 'sold_out'
-
-const SOURCE_OPTS = [
-  { v: 'all',      l: '全部' },
-  { v: 'thailand', l: '🇹🇭 泰國' },
-  { v: 'haido',    l: '🇯🇵 海度' },
-  { v: 'mdm',      l: '🇯🇵 MDM' },
-  { v: 'sd',       l: '🇯🇵 SD' },
-  { v: 'korea',    l: '🇰🇷 韓國' },
-  { v: 'other',    l: '📦 其他' },
-] as const
 
 const STRATEGY_OPTS = [
   { v: 'all',    l: '全部' },
@@ -25,36 +15,34 @@ const STRATEGY_OPTS = [
   { v: 'skip',   l: '⛔ 放棄' },
 ] as const
 
-const SHIPPING_KEY: Record<string, string> = {
-  thailand: 'thailand_shipping_per_kg', haido: 'haido_shipping_per_kg',
-  mdm: 'mdm_shipping_per_kg', sd: 'sd_shipping_per_kg',
-  other: 'other_shipping_per_kg', korea: 'korea_shipping_per_kg',
-}
-
-function getTaxMultiplier(source: string, includeTax: boolean) {
-  if (source === 'korea') return includeTax ? 1.1 : 1
-  if (['haido', 'mdm', 'sd', 'other'].includes(source)) return 1.1
-  return 1
+const DEFAULT_SETTINGS: Settings = {
+  default_service_fee_pct: 0.03,
+  default_packaging_fee: 10,
+  handling_fee_pct: 0.05,
+  target_margin_pct: 0.4,
+  exchange_rate_buffer: 1.05,
 }
 
 export default function InventoryPage() {
   const [products, setProducts]         = useState<any[]>([])
+  const [sources, setSources]           = useState<SourceRow[]>([])
   const [loading, setLoading]           = useState(true)
   const [search, setSearch]             = useState('')
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
+  const [sourceFilter, setSourceFilter] = useState<string>('all')
   const [strategyFilter, setStrategyFilter] = useState<StrategyFilter>('all')
   const [stockFilter, setStockFilter]   = useState<StockFilter>('all')
   const [exporting, setExporting]       = useState(false)
-  const [settings, setSettings]         = useState<Record<string, number>>({
-    thailand_shipping_per_kg: 160, haido_shipping_per_kg: 280,
-    mdm_shipping_per_kg: 280, sd_shipping_per_kg: 280,
-    other_shipping_per_kg: 280, korea_shipping_per_kg: 165,
-    handling_fee_pct: 0.05,
-  })
+  const [settings, setSettings]         = useState<Settings>(DEFAULT_SETTINGS)
+
+  const sourcesMap = useMemo(() =>
+    Object.fromEntries(sources.map(s => [s.id, s])),
+    [sources]
+  )
 
   useEffect(() => {
     fetchProducts()
     fetch('/api/settings').then(r => r.json()).then(d => { if (d) setSettings(prev => ({ ...prev, ...d })) }).catch(() => {})
+    fetch('/api/sources').then(r => r.json()).then(d => { if (Array.isArray(d)) setSources(d) }).catch(() => {})
   }, [])
 
   async function fetchProducts() {
@@ -63,9 +51,7 @@ export default function InventoryPage() {
       const res = await fetch('/api/products')
       const data = await res.json()
       setProducts(Array.isArray(data) ? data : [])
-    } finally {
-      setLoading(false)
-    }
+    } finally { setLoading(false) }
   }
 
   async function handleSold(id: string, qty: number) {
@@ -73,8 +59,7 @@ export default function InventoryPage() {
     if (!product) return
     const newSold = product.sold_quantity + qty
     await fetch(`/api/products/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sold_quantity: newSold }),
     })
     setProducts(prev => prev.map(p =>
@@ -92,22 +77,22 @@ export default function InventoryPage() {
     let updates: Record<string, any> = { ...edits }
 
     if (costChanged) {
-      const shippingPerKg = settings[SHIPPING_KEY[merged.source]] ?? 280
-      const taxMult = getTaxMultiplier(merged.source, merged.include_tax)
-      const twd_cost = (merged.original_cost * taxMult + merged.original_cost * merged.service_fee_pct) * merged.exchange_rate
-      const shipping_fee = (merged.weight_g / 1000) * shippingPerKg
-      const total_cost = twd_cost + shipping_fee + merged.packaging_fee
-      const total_cost_with_handling = total_cost * (1 + (settings.handling_fee_pct ?? 0.05))
+      const src = sourcesMap[merged.source]
+      const shippingPerKg = src?.shipping_per_kg ?? 280
+      const taxPct        = src?.tax_pct ?? 0
+      const twd_cost      = (merged.original_cost * (1 + taxPct) + merged.original_cost * merged.service_fee_pct) * merged.exchange_rate
+      const shipping_fee  = (merged.weight_g / 1000) * shippingPerKg
+      const total_cost    = twd_cost + shipping_fee + merged.packaging_fee
+      const total_cost_with_handling = total_cost * (1 + settings.handling_fee_pct)
       updates = { ...updates, twd_cost, shipping_fee, total_cost, total_cost_with_handling }
     }
 
-    const sp = 'my_selling_price' in edits ? edits.my_selling_price : product.my_selling_price
+    const sp  = 'my_selling_price' in edits ? edits.my_selling_price : product.my_selling_price
     const cwh = updates.total_cost_with_handling ?? product.total_cost_with_handling
     if (sp && cwh) updates.profit_margin = (sp - cwh) / sp
 
     await fetch(`/api/products/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updates),
     })
     setProducts(prev => prev.map(p => {
@@ -129,17 +114,14 @@ export default function InventoryPage() {
       const res = await fetch('/api/export')
       if (!res.ok) throw new Error()
       const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
       a.href = url
-      const cd = res.headers.get('Content-Disposition') ?? ''
-      const match = cd.match(/filename\*=UTF-8''(.+)/)
+      const match = res.headers.get('Content-Disposition')?.match(/filename\*=UTF-8''(.+)/)
       a.download = match ? decodeURIComponent(match[1]) : 'MOUCHI_庫存.xlsx'
       a.click()
       URL.revokeObjectURL(url)
-    } finally {
-      setExporting(false)
-    }
+    } finally { setExporting(false) }
   }
 
   const filtered = useMemo(() => products.filter(p => {
@@ -160,22 +142,19 @@ export default function InventoryPage() {
     const leadCount   = products.filter(p => p.strategy_tag === 'lead').length
     const tagged      = profitCount + leadCount
     return {
-      total:        products.length,
-      totalStock:   products.reduce((s, p) => s + p.remaining_stock, 0),
-      lowStock:     products.filter(p => p.stock_status === 'low_stock').length,
-      soldOut:      products.filter(p => p.stock_status === 'sold_out').length,
-      revenue:      products.reduce((s, p) => s + (p.my_selling_price ?? 0) * p.sold_quantity, 0),
-      profitCount,
-      leadCount,
-      profitPct:    tagged > 0 ? Math.round(profitCount / tagged * 100) : null,
-      leadPct:      tagged > 0 ? Math.round(leadCount   / tagged * 100) : null,
+      total:      products.length,
+      totalStock: products.reduce((s, p) => s + p.remaining_stock, 0),
+      lowStock:   products.filter(p => p.stock_status === 'low_stock').length,
+      soldOut:    products.filter(p => p.stock_status === 'sold_out').length,
+      profitCount, leadCount,
+      profitPct: tagged > 0 ? Math.round(profitCount / tagged * 100) : null,
+      leadPct:   tagged > 0 ? Math.round(leadCount / tagged * 100) : null,
     }
   }, [products])
 
   // ── Desktop layout ──────────────────────────────────────────────
   const desktopContent = (
     <div className="p-6 space-y-5">
-      {/* Page title + stats */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-gray-900">庫存管理</h1>
@@ -192,7 +171,6 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {/* Stats cards */}
       <div className="grid grid-cols-3 gap-4">
         <StatCard label="商品款數" value={String(stats.total)} sub={`在庫 ${stats.totalStock} 件`} />
         <StatCard label="低庫存警示" value={String(stats.lowStock)} warn={stats.lowStock > 0}
@@ -204,48 +182,43 @@ export default function InventoryPage() {
           onClickLead={() => setStrategyFilter('lead')} />
       </div>
 
-      {/* Filter toolbar */}
       <div className="bg-white rounded-2xl border border-gray-100 p-4 flex flex-wrap gap-3 items-center">
-        <input
-          type="search" value={search} onChange={e => setSearch(e.target.value)}
+        <input type="search" value={search} onChange={e => setSearch(e.target.value)}
           placeholder="搜尋商品名稱或編號…"
-          className="flex-1 min-w-[180px] bg-gray-50 rounded-xl px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-pink-200"
-        />
-        <div className="flex gap-1.5">
-          {SOURCE_OPTS.map(o => (
-            <button key={o.v} onClick={() => setSourceFilter(o.v as SourceFilter)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all
-                ${sourceFilter === o.v ? 'bg-pink-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-              {o.l}
+          className="flex-1 min-w-[180px] bg-gray-50 rounded-xl px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-pink-200" />
+        <div className="flex gap-1.5 flex-wrap">
+          <button onClick={() => setSourceFilter('all')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${sourceFilter === 'all' ? 'bg-pink-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            全部
+          </button>
+          {sources.map(s => (
+            <button key={s.id} onClick={() => setSourceFilter(s.id)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${sourceFilter === s.id ? 'bg-pink-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+              {s.label}
             </button>
           ))}
         </div>
         <div className="flex gap-1.5">
           {STRATEGY_OPTS.map(o => (
             <button key={o.v} onClick={() => setStrategyFilter(o.v as StrategyFilter)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all
-                ${strategyFilter === o.v ? 'bg-pink-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${strategyFilter === o.v ? 'bg-pink-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
               {o.l}
             </button>
           ))}
         </div>
-        {stockFilter !== 'all' && (
-          <button onClick={() => setStockFilter('all')}
+        {(stockFilter !== 'all' || sourceFilter !== 'all') && (
+          <button onClick={() => { setStockFilter('all'); setSourceFilter('all') }}
             className="px-3 py-1.5 rounded-xl text-xs font-medium bg-gray-800 text-white hover:bg-gray-700">
             清除篩選 ✕
           </button>
         )}
       </div>
 
-      {/* Table */}
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
         {loading ? (
-          <div className="p-12 text-center text-gray-400">
-            <div className="skeleton h-6 w-1/3 mx-auto mb-3" />
-            <div className="skeleton h-4 w-1/2 mx-auto" />
-          </div>
+          <div className="p-12 text-center text-gray-400">載入中…</div>
         ) : (
-          <InventoryTable products={filtered} onSold={handleSold} onSave={handleSaveProduct} onDelete={handleDelete} />
+          <InventoryTable products={filtered} sourcesMap={sourcesMap} onSold={handleSold} onSave={handleSaveProduct} onDelete={handleDelete} />
         )}
       </div>
     </div>
@@ -254,7 +227,6 @@ export default function InventoryPage() {
   // ── Mobile layout ───────────────────────────────────────────────
   const mobileContent = (
     <div className="min-h-screen pb-6">
-      {/* Header */}
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-gray-100 px-4 py-3">
         <div className="flex items-center justify-between mb-2">
           <div>
@@ -293,19 +265,21 @@ export default function InventoryPage() {
 
       <div className="px-4 pt-3 space-y-2">
         <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-          {SOURCE_OPTS.map(o => (
-            <button key={o.v} onClick={() => setSourceFilter(o.v as SourceFilter)}
-              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all
-                ${sourceFilter === o.v ? 'bg-pink-400 text-white' : 'bg-white text-gray-600 shadow-sm'}`}>
-              {o.l}
+          <button onClick={() => setSourceFilter('all')}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${sourceFilter === 'all' ? 'bg-pink-400 text-white' : 'bg-white text-gray-600 shadow-sm'}`}>
+            全部
+          </button>
+          {sources.map(s => (
+            <button key={s.id} onClick={() => setSourceFilter(s.id)}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${sourceFilter === s.id ? 'bg-pink-400 text-white' : 'bg-white text-gray-600 shadow-sm'}`}>
+              {s.label}
             </button>
           ))}
         </div>
         <div className="flex gap-1.5">
           {STRATEGY_OPTS.map(o => (
             <button key={o.v} onClick={() => setStrategyFilter(o.v as StrategyFilter)}
-              className={`flex-1 py-1.5 rounded-xl text-xs font-medium transition-all
-                ${strategyFilter === o.v ? 'bg-pink-400 text-white' : 'bg-white text-gray-600 shadow-sm'}`}>
+              className={`flex-1 py-1.5 rounded-xl text-xs font-medium transition-all ${strategyFilter === o.v ? 'bg-pink-400 text-white' : 'bg-white text-gray-600 shadow-sm'}`}>
               {o.l}
             </button>
           ))}
@@ -322,13 +296,13 @@ export default function InventoryPage() {
             {!search && <Link href="/" className="mt-3 inline-block text-pink-500 text-sm font-medium">前往入庫 →</Link>}
           </div>
         ) : filtered.map(product => (
-          <ProductCard key={product.id} product={product} onSold={handleSold} onSave={handleSaveProduct} />
+          <ProductCard key={product.id} product={product} sourcesMap={sourcesMap} onSold={handleSold} onSave={handleSaveProduct} />
         ))}
       </div>
 
-      {stockFilter !== 'all' && (
+      {(stockFilter !== 'all' || sourceFilter !== 'all') && (
         <div className="fixed bottom-20 left-0 right-0 max-w-lg mx-auto px-4">
-          <button onClick={() => setStockFilter('all')}
+          <button onClick={() => { setStockFilter('all'); setSourceFilter('all') }}
             className="w-full py-2.5 bg-gray-800 text-white text-sm rounded-2xl font-medium">
             清除篩選 ✕
           </button>
@@ -339,9 +313,7 @@ export default function InventoryPage() {
 
   return (
     <>
-      {/* Desktop */}
       <div className="hidden lg:block">{desktopContent}</div>
-      {/* Mobile */}
       <div className="lg:hidden">{mobileContent}</div>
     </>
   )
@@ -349,10 +321,7 @@ export default function InventoryPage() {
 
 function StatCard({ label, value, sub, warn, onClick }: { label: string; value: string; sub?: string; warn?: boolean; onClick?: () => void }) {
   return (
-    <div
-      onClick={onClick}
-      className={`bg-white rounded-xl border border-gray-100 p-4 ${onClick ? 'cursor-pointer hover:border-pink-200 transition-colors' : ''}`}
-    >
+    <div onClick={onClick} className={`bg-white rounded-xl border border-gray-100 p-4 ${onClick ? 'cursor-pointer hover:border-pink-200 transition-colors' : ''}`}>
       <p className="text-xs text-gray-500 mb-1">{label}</p>
       <p className={`text-2xl font-bold ${warn ? 'text-amber-500' : 'text-gray-800'}`}>{value}</p>
       {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
@@ -373,16 +342,16 @@ function StrategyCard({ profitCount, leadCount, profitPct, leadPct, onClickProfi
       ) : (
         <>
           <div className="flex rounded-full overflow-hidden h-2 mb-2.5">
-            {profitPct !== null && <div className="bg-green-400 transition-all" style={{ width: `${profitPct}%` }} />}
-            {leadPct   !== null && <div className="bg-blue-400 transition-all"  style={{ width: `${leadPct}%` }} />}
+            {profitPct !== null && <div className="bg-green-400" style={{ width: `${profitPct}%` }} />}
+            {leadPct   !== null && <div className="bg-blue-400"  style={{ width: `${leadPct}%` }} />}
           </div>
           <div className="flex gap-3 text-xs">
-            <button onClick={onClickProfit} className="flex items-center gap-1 hover:text-green-700 transition-colors">
+            <button onClick={onClickProfit} className="flex items-center gap-1 hover:text-green-700">
               <span className="w-2 h-2 rounded-full bg-green-400 inline-block" />
               <span className="font-semibold text-green-600">{profitCount}</span>
               <span className="text-gray-400">利潤{profitPct !== null ? ` ${profitPct}%` : ''}</span>
             </button>
-            <button onClick={onClickLead} className="flex items-center gap-1 hover:text-blue-700 transition-colors">
+            <button onClick={onClickLead} className="flex items-center gap-1 hover:text-blue-700">
               <span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />
               <span className="font-semibold text-blue-600">{leadCount}</span>
               <span className="text-gray-400">引流{leadPct !== null ? ` ${leadPct}%` : ''}</span>

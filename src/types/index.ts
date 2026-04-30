@@ -1,31 +1,40 @@
-export type Source = 'thailand' | 'haido' | 'mdm' | 'sd' | 'other' | 'korea'
-export type JapanSupplier = 'haido' | 'mdm' | 'sd' | 'other'
-
-export interface SourceConfig {
+export interface SourceRow {
+  id: string
   label: string
-  currency: 'THB' | 'JPY' | 'KRW' | 'TWD'
-  taxRate: number       // e.g. 1.1 for Japan 10% consumption tax
-  shippingPerGram: number
-  serviceFeePct: number // default 0.03
-  exchangeRate?: number // null = fetch from API, number = fixed
+  currency: string
+  tax_pct: number
+  shipping_per_kg: number
+  search_country: string
+  exchange_rate: number | null
+  exchange_rate_updated_at: string | null
+  sort_order: number
+  created_at?: string
+}
+
+export interface Settings {
+  default_service_fee_pct: number
+  default_packaging_fee: number
+  handling_fee_pct: number
+  target_margin_pct: number
+  exchange_rate_buffer: number
 }
 
 export interface ProductEntry {
   id?: string
   created_at?: string
   image_url: string
-  source: Source
-  original_cost: number        // 原始幣別金額
+  source: string
+  original_cost: number
   weight_g: number
-  packaging_fee: number        // 包裝費用
-  service_fee_pct: number      // 服務費率
-  include_tax: boolean         // 是否含稅（韓國可切換）
-  include_handling: boolean    // 是否加計手續費(×1.05)
-  exchange_rate: number        // 當下使用的匯率
-  twd_cost: number             // 台幣成本
-  shipping_fee: number         // 運費
-  total_cost: number           // 成本總計（不含手續費）
-  total_cost_with_handling: number // 成本總計（含手續費）
+  packaging_fee: number
+  service_fee_pct: number
+  include_tax: boolean
+  include_handling: boolean
+  exchange_rate: number
+  twd_cost: number
+  shipping_fee: number
+  total_cost: number
+  total_cost_with_handling: number
   product_code: string
   product_name: string
   ai_suggested_name: string | null
@@ -38,20 +47,6 @@ export interface ProductEntry {
   stock_quantity: number
   sold_quantity: number
   notes: string
-}
-
-export interface Settings {
-  thailand_shipping_per_kg: number
-  haido_shipping_per_kg: number
-  mdm_shipping_per_kg: number
-  sd_shipping_per_kg: number
-  other_shipping_per_kg: number
-  korea_shipping_per_kg: number
-  default_service_fee_pct: number
-  default_packaging_fee: number
-  handling_fee_pct: number
-  target_margin_pct: number
-  exchange_rate_buffer: number
 }
 
 export interface ExchangeRates {

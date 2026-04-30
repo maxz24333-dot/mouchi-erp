@@ -26,20 +26,14 @@ export default function SettingsPage() {
   const [adding, setAdding]     = useState(false)
   const [newSrc, setNewSrc]     = useState({ ...BLANK_SOURCE })
   const [submittingSrc, setSubmittingSrc] = useState(false)
-  const [refreshingId, setRefreshingId]   = useState<string | null>(null)
   const [editingId, setEditingId]         = useState<string | null>(null)
   const [editForm, setEditForm]           = useState<Partial<SourceRow & { tax_pct_pct: string; shipping_str: string }>>({})
 
   useEffect(() => {
     fetch('/api/settings').then(r => r.json()).then(d => { if (d) setSettings(prev => ({ ...prev, ...d })) })
-    loadSources()
+    // GET auto-refreshes stale rates (>1hr) from 台銀 API
+    fetch('/api/sources').then(r => r.json()).then(d => { if (Array.isArray(d)) setSources(d) })
   }, [])
-
-  function loadSources() {
-    fetch('/api/sources').then(r => r.json()).then(d => {
-      if (Array.isArray(d)) setSources(d)
-    })
-  }
 
   function update(key: keyof Settings, value: string) {
     setSettings(prev => ({ ...prev, [key]: parseFloat(value) || 0 }))
@@ -72,36 +66,10 @@ export default function SettingsPage() {
       if (res.ok) {
         setAdding(false)
         setNewSrc({ ...BLANK_SOURCE })
-        loadSources()
+        fetch('/api/sources').then(r => r.json()).then(d => { if (Array.isArray(d)) setSources(d) })
       }
     } finally {
       setSubmittingSrc(false)
-    }
-  }
-
-  async function handleRefreshRate(id: string) {
-    setRefreshingId(id)
-    try {
-      const res = await fetch(`/api/sources/${id}`, { method: 'POST' })
-      if (res.ok) {
-        const updated = await res.json()
-        setSources(prev => prev.map(s => s.id === id ? updated : s))
-      }
-    } finally {
-      setRefreshingId(null)
-    }
-  }
-
-  async function handleRefreshAll() {
-    setRefreshingId('all')
-    try {
-      await Promise.all(sources.map(s =>
-        fetch(`/api/sources/${s.id}`, { method: 'POST' })
-          .then(r => r.ok ? r.json() : null)
-          .then(updated => { if (updated) setSources(prev => prev.map(p => p.id === updated.id ? updated : p)) })
-      ))
-    } finally {
-      setRefreshingId(null)
     }
   }
 
@@ -142,10 +110,12 @@ export default function SettingsPage() {
   }
 
   function rateAge(updatedAt: string | null) {
-    if (!updatedAt) return '未取得'
-    const h = Math.floor((Date.now() - new Date(updatedAt).getTime()) / 3600000)
-    if (h < 1) return '剛更新'
-    if (h < 24) return `${h} 小時前`
+    if (!updatedAt) return '自動更新中…'
+    const m = Math.floor((Date.now() - new Date(updatedAt).getTime()) / 60000)
+    if (m < 2)   return '剛更新 ✓'
+    if (m < 60)  return `${m} 分鐘前`
+    const h = Math.floor(m / 60)
+    if (h < 24)  return `${h} 小時前`
     return `${Math.floor(h / 24)} 天前`
   }
 
@@ -161,17 +131,14 @@ export default function SettingsPage() {
         {/* ── 來源管理 ── */}
         <div className="bg-white rounded-2xl shadow-sm p-4">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-gray-700">來源管理</h2>
-            <div className="flex gap-2">
-              <button onClick={handleRefreshAll} disabled={refreshingId === 'all'}
-                className="text-xs text-blue-500 bg-blue-50 px-2.5 py-1 rounded-lg disabled:opacity-50">
-                {refreshingId === 'all' ? '更新中…' : '↻ 全部更新匯率'}
-              </button>
-              <button onClick={() => setAdding(v => !v)}
-                className="text-xs text-white bg-pink-500 px-2.5 py-1 rounded-lg">
-                {adding ? '取消' : '＋ 新增來源'}
-              </button>
+            <div>
+              <h2 className="text-sm font-semibold text-gray-700">來源管理</h2>
+              <p className="text-[10px] text-gray-400 mt-0.5">匯率每小時自動從台銀 API 更新</p>
             </div>
+            <button onClick={() => setAdding(v => !v)}
+              className="text-xs text-white bg-pink-500 px-2.5 py-1 rounded-lg">
+              {adding ? '取消' : '＋ 新增來源'}
+            </button>
           </div>
 
           {/* 新增表單 */}
@@ -255,10 +222,6 @@ export default function SettingsPage() {
                       )}
                     </div>
                     <div className="flex flex-col gap-1 shrink-0">
-                      <button onClick={() => handleRefreshRate(s.id)} disabled={refreshingId === s.id}
-                        className="text-[10px] text-blue-500 bg-blue-50 px-2 py-0.5 rounded disabled:opacity-50">
-                        {refreshingId === s.id ? '…' : '↻'}
-                      </button>
                       <button onClick={() => startEdit(s)} className="text-[10px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded">編輯</button>
                       <button onClick={() => handleDeleteSource(s.id, s.label)} className="text-[10px] text-red-400 bg-red-50 px-2 py-0.5 rounded">刪除</button>
                     </div>

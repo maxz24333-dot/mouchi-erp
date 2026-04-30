@@ -13,7 +13,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if ('shipping_per_kg' in body) updates.shipping_per_kg = parseFloat(body.shipping_per_kg)
     if ('search_country'  in body) updates.search_country  = String(body.search_country).toLowerCase()
 
-    // If currency changed, refresh rate
+    // If currency changed, immediately refresh rate
     if ('currency' in body) {
       const rate = await fetchRateToTWD(String(body.currency))
       if (rate) {
@@ -40,29 +40,4 @@ export async function DELETE(_: NextRequest, { params }: { params: { id: string 
   const { error } = await supabase.from('sources').delete().eq('id', params.id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })
-}
-
-// POST /api/sources/[id]/refresh-rate is handled in the refresh-rate subfolder
-// This route also supports refresh via PATCH with { refreshRate: true }
-export async function POST(_: NextRequest, { params }: { params: { id: string } }) {
-  const { data: src, error: fetchErr } = await supabase
-    .from('sources')
-    .select('currency')
-    .eq('id', params.id)
-    .single()
-
-  if (fetchErr || !src) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-
-  const rate = await fetchRateToTWD(src.currency)
-  if (!rate) return NextResponse.json({ error: 'Cannot fetch rate for ' + src.currency }, { status: 502 })
-
-  const { data, error } = await supabase
-    .from('sources')
-    .update({ exchange_rate: rate, exchange_rate_updated_at: new Date().toISOString() })
-    .eq('id', params.id)
-    .select()
-    .single()
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data)
 }

@@ -306,6 +306,11 @@ export async function POST(req: NextRequest) {
         )
         shopResults.forEach(r => ecommercePrices.push(...r))
       }
+      // 仍不足時用 AI 關鍵字補搜台灣電商（類似品項參考）
+      if (ecommercePrices.length < 3 && serperKey && brandInfo.searchQuery) {
+        const twFallback = await shoppingSearch(brandInfo.searchQuery, serperKey, 'tw', 50)
+        ecommercePrices.push(...twFallback)
+      }
       ecommerceCount = ecommercePrices.length
     }
 

@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 
 const SOURCE_LABEL: Record<string, string> = {
   thailand: '🇹🇭 泰國', haido: '🇯🇵 海度', mdm: '🇯🇵 MDM',
@@ -14,9 +14,9 @@ const STRATEGY_CONFIG = {
   skip:   { label: '⛔ 放棄',  color: 'bg-red-100 text-red-700' },
 }
 const STOCK_CONFIG = {
-  in_stock:  { label: '庫存充足', color: 'text-green-600' },
-  low_stock: { label: '庫存偏低', color: 'text-amber-500' },
-  sold_out:  { label: '已售完',  color: 'text-red-400' },
+  in_stock:  { color: 'text-green-600' },
+  low_stock: { color: 'text-amber-500' },
+  sold_out:  { color: 'text-red-400' },
 }
 
 interface Props {
@@ -44,31 +44,33 @@ function initForm(p: any) {
   }
 }
 
+function isDirty(form: Record<string, string>, product: any) {
+  const orig = initForm(product)
+  return Object.keys(orig).some(k => form[k] !== orig[k])
+}
+
 export default function ProductCard({ product, onSold, onSave }: Props) {
-  const [expanded, setExpanded] = useState(false)
-  const [editing, setEditing]   = useState(false)
-  const [form, setForm]         = useState<Record<string, string>>({})
+  const [form, setForm]         = useState<Record<string, string>>(() => initForm(product))
   const [saving, setSaving]     = useState(false)
   const [soldQty, setSoldQty]   = useState(1)
+  const [adOpen, setAdOpen]     = useState(false)
+  const [soldOpen, setSoldOpen] = useState(false)
 
-  const name     = product.ai_suggested_name || product.product_name || '未命名商品'
-  const profit   = product.my_selling_price && product.total_cost_with_handling
-    ? product.my_selling_price - product.total_cost_with_handling : null
-  const margin   = profit !== null && product.my_selling_price
-    ? (profit / product.my_selling_price * 100).toFixed(1) : null
-  const strategy  = product.strategy_tag ? STRATEGY_CONFIG[product.strategy_tag as keyof typeof STRATEGY_CONFIG] : null
-  const stockInfo = STOCK_CONFIG[product.stock_status as keyof typeof STOCK_CONFIG]
-  const currency  = CURRENCY_LABEL[product.source] ?? 'JPY'
+  const dirty    = isDirty(form, product)
+  const name     = form.ai_suggested_name || form.product_name || '未命名商品'
+  const currency = CURRENCY_LABEL[product.source] ?? 'JPY'
+  const strategy = form.strategy_tag ? STRATEGY_CONFIG[form.strategy_tag as keyof typeof STRATEGY_CONFIG] : null
+  const stockClr = STOCK_CONFIG[product.stock_status as keyof typeof STOCK_CONFIG]?.color ?? 'text-gray-400'
 
-  function startEdit() {
-    setForm(initForm(product))
-    setEditing(true)
-    setExpanded(true)
-  }
+  const sellingPrice = parseFloat(form.my_selling_price) || null
+  const profit = sellingPrice && product.total_cost_with_handling
+    ? sellingPrice - product.total_cost_with_handling : null
+  const margin = profit !== null && sellingPrice
+    ? (profit / sellingPrice * 100).toFixed(1) : null
 
-  function set(key: string, val: string) { setForm(prev => ({ ...prev, [key]: val })) }
+  const set = (k: string, v: string) => setForm(prev => ({ ...prev, [k]: v }))
 
-  async function confirmSave() {
+  async function handleSave() {
     setSaving(true)
     await onSave(product.id, {
       ai_suggested_name: form.ai_suggested_name || null,
@@ -87,156 +89,179 @@ export default function ProductCard({ product, onSold, onSave }: Props) {
       ad_copy:           form.ad_copy,
     })
     setSaving(false)
-    setEditing(false)
   }
 
   return (
     <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-      {/* Main row */}
-      <button type="button" onClick={() => { setExpanded(v => !v); setEditing(false) }}
-        className="w-full flex gap-3 p-3 text-left active:bg-gray-50">
-        <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">
+
+      {/* ── Header row ── */}
+      <div className="flex gap-3 p-3">
+        <div className="w-14 h-14 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">
           {product.image_url
             ? <img src={product.image_url} alt={name} className="w-full h-full object-cover" />
             : <div className="w-full h-full flex items-center justify-center text-2xl">👗</div>}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-1">
-            <p className="text-sm font-semibold text-gray-800 leading-tight line-clamp-2">{name}</p>
-            {strategy && <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${strategy.color}`}>{strategy.label}</span>}
+          <div className="flex items-start gap-1 justify-between">
+            <input
+              value={form.ai_suggested_name}
+              onChange={e => set('ai_suggested_name', e.target.value)}
+              placeholder="AI販售名稱"
+              className="flex-1 text-sm font-semibold text-gray-800 bg-transparent outline-none focus:bg-pink-50 focus:rounded px-1 -ml-1 min-w-0"
+            />
+            <select
+              value={form.strategy_tag}
+              onChange={e => set('strategy_tag', e.target.value)}
+              className={`text-xs px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 border-0 outline-none cursor-pointer ${strategy ? strategy.color : 'bg-gray-100 text-gray-400'}`}
+            >
+              <option value="">— 戰略</option>
+              <option value="profit">💰 利潤品</option>
+              <option value="lead">📣 引流品</option>
+              <option value="skip">⛔ 放棄</option>
+            </select>
           </div>
-          <p className="text-xs text-gray-400 mt-0.5">{SOURCE_LABEL[product.source]} · {product.product_code || '—'}</p>
-          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-            <span className="text-sm font-bold text-gray-800">NT${product.my_selling_price?.toLocaleString() ?? '—'}</span>
+          <div className="flex items-center gap-1 mt-0.5">
+            <span className="text-xs text-gray-400">{SOURCE_LABEL[product.source]}</span>
+            <span className="text-xs text-gray-300">·</span>
+            <input
+              value={form.product_code}
+              onChange={e => set('product_code', e.target.value)}
+              placeholder="商品編號"
+              className="text-xs text-gray-400 bg-transparent outline-none focus:bg-pink-50 focus:rounded px-1 w-24"
+            />
+          </div>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-sm font-bold text-gray-800">
+              NT$<input
+                type="number"
+                value={form.my_selling_price}
+                onChange={e => set('my_selling_price', e.target.value)}
+                placeholder="賣價"
+                className="inline w-16 bg-transparent outline-none focus:bg-pink-50 focus:rounded px-0.5 font-bold text-gray-800 text-sm"
+              />
+            </span>
             {profit !== null && (
               <span className={`text-xs font-medium ${profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                 毛利 NT${profit.toFixed(0)}{margin ? ` (${margin}%)` : ''}
               </span>
             )}
-            <span className={`text-xs ml-auto ${stockInfo.color}`}>剩 {product.remaining_stock} 件</span>
           </div>
         </div>
-      </button>
+      </div>
 
-      {/* Expanded */}
-      {expanded && (
-        <div className="border-t border-gray-100 px-3 pb-3 pt-2 space-y-3">
-          {!editing ? (
-            <>
-              {/* Read-only detail */}
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs bg-gray-50 rounded-xl p-2.5">
-                <Row label="原始成本" value={`${product.original_cost} ${currency}`} />
-                <Row label="匯率" value={product.exchange_rate?.toFixed(4)} />
-                <Row label="台幣成本" value={`NT$${product.twd_cost?.toFixed(0)}`} />
-                <Row label="運費" value={`NT$${product.shipping_fee?.toFixed(0)}`} />
-                <Row label="落地含手續費" value={`NT$${product.total_cost_with_handling?.toFixed(0)}`} accent />
-                <Row label="重量" value={`${product.weight_g}g`} />
-                <Row label="進貨" value={`${product.stock_quantity} 件`} />
-                <Row label="已售" value={`${product.sold_quantity} 件`} />
-              </div>
-              {product.notes && <p className="text-xs text-gray-500 bg-gray-50 rounded-xl px-3 py-2 whitespace-pre-wrap">{product.notes}</p>}
-              {product.ad_copy && (
-                <div>
-                  <p className="text-xs text-gray-400 mb-1">廣告文案</p>
-                  <p className="text-xs text-gray-600 bg-gray-50 rounded-xl px-3 py-2 whitespace-pre-wrap max-h-32 overflow-y-auto">{product.ad_copy}</p>
-                </div>
-              )}
-              <button type="button" onClick={startEdit}
-                className="w-full py-2 bg-blue-50 text-blue-600 text-sm rounded-xl font-medium active:bg-blue-100">編輯資料</button>
-              {product.remaining_stock > 0 && (
-                <div className="flex gap-2 items-center">
-                  <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-1.5">
-                    <button type="button" onClick={() => setSoldQty(v => Math.max(1, v - 1))} className="text-gray-500 text-lg w-6 text-center">−</button>
-                    <span className="text-sm font-semibold w-4 text-center">{soldQty}</span>
-                    <button type="button" onClick={() => setSoldQty(v => Math.min(product.remaining_stock, v + 1))} className="text-gray-500 text-lg w-6 text-center">+</button>
-                  </div>
-                  <button type="button" onClick={() => { onSold(product.id, soldQty); setSoldQty(1) }}
-                    className="flex-1 py-2 bg-pink-500 text-white text-sm rounded-xl font-medium active:bg-pink-600">
-                    出貨 {soldQty} 件
-                  </button>
-                </div>
-              )}
-            </>
-          ) : (
-            /* Edit form */
-            <div className="space-y-3">
-              <Section title="商品資料">
-                <Field label="AI販售名"><input value={form.ai_suggested_name} onChange={e => set('ai_suggested_name', e.target.value)} className={ic} /></Field>
-                <Field label="商品編號"><input value={form.product_code} onChange={e => set('product_code', e.target.value)} className={ic} /></Field>
-                <Field label="品名原文"><input value={form.product_name} onChange={e => set('product_name', e.target.value)} className={ic} /></Field>
-                <Field label="戰略">
-                  <select value={form.strategy_tag} onChange={e => set('strategy_tag', e.target.value)} className={ic}>
-                    <option value="">—</option>
-                    <option value="profit">💰 利潤品</option>
-                    <option value="lead">📣 引流品</option>
-                    <option value="skip">⛔ 放棄</option>
-                  </select>
-                </Field>
-              </Section>
+      <div className="px-3 pb-3 space-y-2.5 border-t border-gray-50 pt-2">
 
-              <Section title={`成本 (${currency})`}>
-                <Field label={`原始成本 (${currency})`}><input type="number" value={form.original_cost} onChange={e => set('original_cost', e.target.value)} className={ic} /></Field>
-                <Field label="重量 (g)"><input type="number" value={form.weight_g} onChange={e => set('weight_g', e.target.value)} className={ic} /></Field>
-                <Field label="包裝費 (NT$)"><input type="number" value={form.packaging_fee} onChange={e => set('packaging_fee', e.target.value)} className={ic} /></Field>
-                <Field label="服務費 (%)"><input type="number" value={form.service_fee_pct} onChange={e => set('service_fee_pct', e.target.value)} className={ic} /></Field>
-                <div className="text-xs text-gray-400 bg-gray-50 rounded-xl px-3 py-2">
-                  台幣成本 NT${product.twd_cost?.toFixed(0)} · 運費 NT${product.shipping_fee?.toFixed(0)} · 落地 NT${product.total_cost_with_handling?.toFixed(0)} (儲存後更新)
-                </div>
-              </Section>
-
-              <Section title="庫存 / 定價">
-                <Field label="我的賣價"><input type="number" value={form.my_selling_price} onChange={e => set('my_selling_price', e.target.value)} className={ic} /></Field>
-                <Field label="庫存數量"><input type="number" value={form.stock_quantity} onChange={e => set('stock_quantity', e.target.value)} className={ic} /></Field>
-                <Field label="已售數量"><input type="number" value={form.sold_quantity} onChange={e => set('sold_quantity', e.target.value)} className={ic} /></Field>
-              </Section>
-
-              <Section title="文案">
-                <Field label="備註"><textarea value={form.notes} onChange={e => set('notes', e.target.value)} rows={2} className={ic + ' resize-none'} /></Field>
-                <Field label="供應商文案"><textarea value={form.supplier_copy} onChange={e => set('supplier_copy', e.target.value)} rows={3} className={ic + ' resize-none'} /></Field>
-                <Field label="廣告文案"><textarea value={form.ad_copy} onChange={e => set('ad_copy', e.target.value)} rows={4} className={ic + ' resize-none'} /></Field>
-              </Section>
-
-              <div className="flex gap-2">
-                <button type="button" onClick={confirmSave} disabled={saving}
-                  className="flex-1 py-2.5 bg-pink-500 text-white text-sm rounded-xl font-medium active:bg-pink-600 disabled:opacity-50">
-                  {saving ? '儲存中…' : '儲存'}
-                </button>
-                <button type="button" onClick={() => setEditing(false)}
-                  className="px-4 py-2.5 bg-gray-100 text-gray-600 text-sm rounded-xl">取消</button>
-              </div>
-            </div>
-          )}
+        {/* ── 成本資料 ── */}
+        <div className="bg-gray-50 rounded-xl px-3 py-2 space-y-1.5">
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">成本</p>
+          <Row label={`原始成本 (${currency})`}>
+            <input type="number" value={form.original_cost} onChange={e => set('original_cost', e.target.value)} className={fi} />
+          </Row>
+          <Row label="重量 (g)">
+            <input type="number" value={form.weight_g} onChange={e => set('weight_g', e.target.value)} className={fi} />
+          </Row>
+          <Row label="包裝費 (NT$)">
+            <input type="number" value={form.packaging_fee} onChange={e => set('packaging_fee', e.target.value)} className={fi} />
+          </Row>
+          <Row label="服務費 (%)">
+            <input type="number" value={form.service_fee_pct} onChange={e => set('service_fee_pct', e.target.value)} className={fi} />
+          </Row>
+          <div className="border-t border-gray-200 pt-1.5 mt-1">
+            <Row label="台幣成本"><span className="text-xs font-medium text-gray-600">NT${product.twd_cost?.toFixed(0) ?? '—'}</span></Row>
+            <Row label="運費"><span className="text-xs font-medium text-gray-600">NT${product.shipping_fee?.toFixed(0) ?? '—'}</span></Row>
+            <Row label="落地含手續費"><span className="text-xs font-semibold text-pink-600">NT${product.total_cost_with_handling?.toFixed(0) ?? '—'}</span></Row>
+          </div>
         </div>
-      )}
+
+        {/* ── 庫存 ── */}
+        <div className="bg-gray-50 rounded-xl px-3 py-2 space-y-1.5">
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">庫存</p>
+          <Row label="庫存數量">
+            <input type="number" value={form.stock_quantity} onChange={e => set('stock_quantity', e.target.value)} className={fi} />
+          </Row>
+          <Row label="已售數量">
+            <input type="number" value={form.sold_quantity} onChange={e => set('sold_quantity', e.target.value)} className={fi} />
+          </Row>
+          <Row label="剩餘">
+            <span className={`text-xs font-semibold ${stockClr}`}>
+              {(parseInt(form.stock_quantity)||0) - (parseInt(form.sold_quantity)||0)} 件
+            </span>
+          </Row>
+        </div>
+
+        {/* ── 備註 ── */}
+        <div className="bg-gray-50 rounded-xl px-3 py-2 space-y-1.5">
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">備註 / 文案</p>
+          <div>
+            <p className="text-[10px] text-gray-400 mb-0.5">備註</p>
+            <textarea value={form.notes} onChange={e => set('notes', e.target.value)} rows={2}
+              className="w-full text-xs bg-white border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-pink-300 resize-none" />
+          </div>
+          <div>
+            <p className="text-[10px] text-gray-400 mb-0.5">供應商文案</p>
+            <textarea value={form.supplier_copy} onChange={e => set('supplier_copy', e.target.value)} rows={2}
+              className="w-full text-xs bg-white border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-pink-300 resize-none" />
+          </div>
+        </div>
+
+        {/* ── 廣告文案 accordion ── */}
+        <button type="button" onClick={() => setAdOpen(v => !v)}
+          className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 rounded-xl text-xs font-medium text-gray-500 active:bg-gray-100">
+          <span>廣告文案 {form.ad_copy ? `(${form.ad_copy.length} 字)` : '（空白）'}</span>
+          <span className="text-gray-400">{adOpen ? '▲' : '▼'}</span>
+        </button>
+        {adOpen && (
+          <textarea value={form.ad_copy} onChange={e => set('ad_copy', e.target.value)} rows={8}
+            className="w-full text-xs bg-white border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-pink-300 resize-none"
+            placeholder="廣告文案…" />
+        )}
+
+        {/* ── 品名原文 ── */}
+        <div className="px-1">
+          <p className="text-[10px] text-gray-400 mb-0.5">品名（原文）</p>
+          <input value={form.product_name} onChange={e => set('product_name', e.target.value)}
+            className="w-full text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-lg px-2 py-1.5 outline-none focus:border-pink-300" />
+        </div>
+
+        {/* ── 出貨 + 儲存 ── */}
+        <div className="flex gap-2 pt-1">
+          {soldOpen ? (
+            <div className="flex items-center gap-1.5 flex-1 bg-gray-50 rounded-xl px-2 py-1.5">
+              <button type="button" onClick={() => setSoldQty(v => Math.max(1, v - 1))} className="text-gray-500 text-base w-6 text-center">−</button>
+              <span className="text-sm font-semibold w-5 text-center">{soldQty}</span>
+              <button type="button" onClick={() => setSoldQty(v => Math.min(product.remaining_stock, v + 1))} className="text-gray-500 text-base w-6 text-center">+</button>
+              <button type="button"
+                onClick={() => { onSold(product.id, soldQty); setSoldQty(1); setSoldOpen(false) }}
+                className="flex-1 py-1 bg-pink-500 text-white text-xs rounded-lg font-medium">
+                出貨 {soldQty} 件
+              </button>
+              <button type="button" onClick={() => setSoldOpen(false)} className="text-gray-400 text-xs px-1">✕</button>
+            </div>
+          ) : (
+            <button type="button"
+              onClick={() => setSoldOpen(true)}
+              disabled={product.remaining_stock === 0}
+              className="flex-1 py-2 text-sm font-medium rounded-xl bg-gray-100 text-gray-600 active:bg-gray-200 disabled:opacity-40">
+              出貨
+            </button>
+          )}
+          <button type="button" onClick={handleSave} disabled={saving || !dirty}
+            className="flex-1 py-2 text-sm font-semibold rounded-xl bg-pink-500 text-white active:bg-pink-600 disabled:opacity-30 transition-opacity">
+            {saving ? '儲存中…' : dirty ? '儲存變更' : '已儲存'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
 
-function Row({ label, value, accent }: { label: string; value?: string | null; accent?: boolean }) {
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex justify-between gap-1">
-      <span className="text-gray-400">{label}</span>
-      <span className={`font-medium ${accent ? 'text-pink-600' : 'text-gray-700'}`}>{value ?? '—'}</span>
-    </div>
-  )
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="bg-gray-50 rounded-xl p-3 space-y-2">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{title}</p>
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-[10px] text-gray-400 shrink-0">{label}</span>
       {children}
     </div>
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <p className="text-xs text-gray-400 mb-0.5">{label}</p>
-      {children}
-    </div>
-  )
-}
-
-const ic = 'w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-pink-300 bg-white'
+const fi = 'w-20 text-right text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded px-1.5 py-0.5 outline-none focus:border-pink-300'

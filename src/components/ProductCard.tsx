@@ -39,7 +39,7 @@ function initForm(p: any) {
 }
 
 function isDirty(form: Record<string, string>, product: any) {
-  const orig = initForm(product)
+  const orig = initForm(product) as Record<string, string>
   return Object.keys(orig).some(k => form[k] !== orig[k])
 }
 

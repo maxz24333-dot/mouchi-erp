@@ -1,6 +1,7 @@
 'use client'
 import { useState, Fragment } from 'react'
-import type { SourceRow, ProductVariant } from '@/types'
+import type { SourceRow, ProductVariant, Settings } from '@/types'
+import { calcCost } from '@/lib/cost'
 const STRATEGY_CONFIG: Record<string, { label: string; cls: string }> = {
   lead:   { label: '📣 引流', cls: 'bg-blue-50 text-blue-600' },
   profit: { label: '💰 利潤', cls: 'bg-green-50 text-green-700' },
@@ -10,6 +11,7 @@ const STRATEGY_CONFIG: Record<string, { label: string; cls: string }> = {
 interface Props {
   products: any[]
   sourcesMap: Record<string, SourceRow>
+  settings: Settings
   onSold: (id: string, qty: number) => void
   onSave: (id: string, edits: Record<string, any>) => Promise<void>
   onDelete: (id: string) => Promise<void>
@@ -39,7 +41,7 @@ function isDirty(form: Record<string, string>, p: any) {
   return Object.keys(orig).some(k => form[k] !== orig[k])
 }
 
-export default function InventoryTable({ products, sourcesMap, onSold, onSave, onDelete }: Props) {
+export default function InventoryTable({ products, sourcesMap, settings, onSold, onSave, onDelete }: Props) {
   if (products.length === 0) {
     return (
       <div className="text-center py-20 text-gray-400">
@@ -69,7 +71,7 @@ export default function InventoryTable({ products, sourcesMap, onSold, onSave, o
         </thead>
         <tbody>
           {products.map(p => (
-            <ProductRow key={p.id} product={p} sourcesMap={sourcesMap} onSold={onSold} onSave={onSave} onDelete={onDelete} />
+            <ProductRow key={p.id} product={p} sourcesMap={sourcesMap} settings={settings} onSold={onSold} onSave={onSave} onDelete={onDelete} />
           ))}
         </tbody>
       </table>
@@ -77,9 +79,10 @@ export default function InventoryTable({ products, sourcesMap, onSold, onSave, o
   )
 }
 
-function ProductRow({ product: p, sourcesMap, onSold, onSave, onDelete }: {
+function ProductRow({ product: p, sourcesMap, settings, onSold, onSave, onDelete }: {
   product: any
   sourcesMap: Record<string, SourceRow>
+  settings: Settings
   onSold: (id: string, qty: number) => void
   onSave: (id: string, edits: Record<string, any>) => Promise<void>
   onDelete: (id: string) => Promise<void>
@@ -108,11 +111,23 @@ function ProductRow({ product: p, sourcesMap, onSold, onSave, onDelete }: {
   const srcLabel = srcInfo?.label ?? p.source ?? '—'
   const strategy = form.strategy_tag ? STRATEGY_CONFIG[form.strategy_tag] : null
 
+  // live cost computation — recalculates whenever form changes
+  const liveCost = (parseFloat(form.original_cost) > 0 && p.exchange_rate)
+    ? calcCost({
+        originalCost:   parseFloat(form.original_cost) || 0,
+        weightG:        parseFloat(form.weight_g) || 0,
+        packagingFee:   parseFloat(form.packaging_fee) || 0,
+        serviceFeePct:  (parseFloat(form.service_fee_pct) || 0) / 100,
+        taxPct:         srcInfo?.tax_pct ?? 0,
+        exchangeRate:   p.exchange_rate,
+        handlingFeePct: settings.handling_fee_pct,
+      }, srcInfo?.shipping_per_kg ?? 280)
+    : null
+
   const sellingPrice = parseFloat(form.my_selling_price) || null
-  const profit = sellingPrice && p.total_cost_with_handling
-    ? sellingPrice - p.total_cost_with_handling : null
-  const margin = profit !== null && sellingPrice
-    ? profit / sellingPrice * 100 : null
+  const totalCostWH  = liveCost?.totalCostWithHandling ?? p.total_cost_with_handling ?? 0
+  const profit  = sellingPrice && totalCostWH ? sellingPrice - totalCostWH : null
+  const margin  = profit !== null && sellingPrice ? profit / sellingPrice * 100 : null
   const marginCls = margin === null ? 'text-gray-300' : margin >= 30 ? 'text-green-600' : margin < 0 ? 'text-red-500' : 'text-amber-500'
 
   const totalStock    = hasVariants ? variants.reduce((s, v) => s + v.stock_quantity, 0) : (parseInt(form.stock_quantity) || 0)
@@ -124,6 +139,7 @@ function ProductRow({ product: p, sourcesMap, onSold, onSave, onDelete }: {
 
   async function handleSave() {
     setSaving(true)
+    const sp = parseFloat(form.my_selling_price) || null
     await onSave(p.id, {
       ai_suggested_name: form.ai_suggested_name || null,
       product_code:      form.product_code,
@@ -133,12 +149,19 @@ function ProductRow({ product: p, sourcesMap, onSold, onSave, onDelete }: {
       weight_g:          parseFloat(form.weight_g) || 0,
       packaging_fee:     parseFloat(form.packaging_fee) || 0,
       service_fee_pct:   (parseFloat(form.service_fee_pct) || 0) / 100,
-      my_selling_price:  parseFloat(form.my_selling_price) || null,
+      my_selling_price:  sp,
+      ...(liveCost && {
+        twd_cost:                 liveCost.twdCost,
+        shipping_fee:             liveCost.shippingFee,
+        total_cost:               liveCost.totalCost,
+        total_cost_with_handling: liveCost.totalCostWithHandling,
+        profit_margin:            sp && sp > 0 ? liveCost.profitMargin(sp) : null,
+      }),
       ...(!hasVariants && {
         stock_quantity: parseInt(form.stock_quantity) || 0,
         sold_quantity:  parseInt(form.sold_quantity)  || 0,
       }),
-      notes:        form.notes,
+      notes:         form.notes,
       supplier_copy: form.supplier_copy,
       ad_copy:       form.ad_copy,
     })
@@ -279,9 +302,9 @@ function ProductRow({ product: p, sourcesMap, onSold, onSave, onDelete }: {
           </div>
         </td>
 
-        {/* 落地成本 (readonly) */}
+        {/* 落地成本 (即時計算) */}
         <td className="px-3 py-2 text-right font-medium text-gray-600 text-sm">
-          NT${p.total_cost_with_handling?.toFixed(0) ?? '—'}
+          NT${(liveCost?.totalCostWithHandling ?? p.total_cost_with_handling)?.toFixed(0) ?? '—'}
         </td>
 
         {/* 賣價 */}
@@ -479,7 +502,7 @@ function ProductRow({ product: p, sourcesMap, onSold, onSave, onDelete }: {
                   </SmallField>
                 </div>
                 <p className="text-[10px] text-gray-400">
-                  台幣 NT${p.twd_cost?.toFixed(0) ?? '—'} · 運費 NT${p.shipping_fee?.toFixed(0) ?? '—'} · 落地 <span className="text-pink-500 font-semibold">NT${p.total_cost_with_handling?.toFixed(0) ?? '—'}</span>
+                  台幣 NT${(liveCost?.twdCost ?? p.twd_cost)?.toFixed(0) ?? '—'} · 運費 NT${(liveCost?.shippingFee ?? p.shipping_fee)?.toFixed(0) ?? '—'} · 落地 <span className="text-pink-500 font-semibold">NT${(liveCost?.totalCostWithHandling ?? p.total_cost_with_handling)?.toFixed(0) ?? '—'}</span>
                 </p>
               </div>
               <div className="flex-1 space-y-1.5">

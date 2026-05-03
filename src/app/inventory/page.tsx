@@ -218,7 +218,7 @@ export default function InventoryPage() {
         {loading ? (
           <div className="p-12 text-center text-gray-400">載入中…</div>
         ) : (
-          <InventoryTable products={filtered} sourcesMap={sourcesMap} onSold={handleSold} onSave={handleSaveProduct} onDelete={handleDelete} />
+          <InventoryTable products={filtered} sourcesMap={sourcesMap} settings={settings} onSold={handleSold} onSave={handleSaveProduct} onDelete={handleDelete} />
         )}
       </div>
     </div>

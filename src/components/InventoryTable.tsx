@@ -283,65 +283,58 @@ function ProductRow({ product: p, sourcesMap, onSold, onSave, onDelete }: {
         </td>
       </tr>
 
-      {/* ── 文案展開列 ── */}
+      {/* ── 成本細節 + 備註（永遠顯示） ── */}
+      <tr className="border-b border-gray-100 bg-gray-50/40">
+        <td />
+        <td colSpan={9} className="px-3 pb-2.5 pt-1">
+          <div className="flex flex-wrap gap-x-5 gap-y-1.5 items-end">
+            <SmallField label="重量 (g)">
+              <input type="number" value={form.weight_g} onChange={e => set('weight_g', e.target.value)} className={sic} />
+            </SmallField>
+            <SmallField label="包裝費 (NT$)">
+              <input type="number" value={form.packaging_fee} onChange={e => set('packaging_fee', e.target.value)} className={sic} />
+            </SmallField>
+            <SmallField label="服務費 (%)">
+              <input type="number" value={form.service_fee_pct} onChange={e => set('service_fee_pct', e.target.value)} className={sic} />
+            </SmallField>
+            <SmallField label="品名原文">
+              <input value={form.product_name} onChange={e => set('product_name', e.target.value)} className={sic + ' w-36'} />
+            </SmallField>
+            <div className="text-[10px] text-gray-400 leading-4 self-end pb-0.5">
+              台幣 NT${p.twd_cost?.toFixed(0) ?? '—'} ·
+              運費 NT${p.shipping_fee?.toFixed(0) ?? '—'} ·
+              落地 <span className="text-pink-500 font-semibold">NT${p.total_cost_with_handling?.toFixed(0) ?? '—'}</span>
+            </div>
+            <div className="flex-1 min-w-[180px]">
+              <SmallField label="備註">
+                <input value={form.notes} onChange={e => set('notes', e.target.value)}
+                  placeholder="尺碼、顏色、規格…" className={sic + ' w-full'} />
+              </SmallField>
+            </div>
+          </div>
+        </td>
+      </tr>
+
+      {/* ── 廣告文案展開列 ── */}
       {copyOpen && (
         <tr className="bg-blue-50/20 border-b border-blue-100">
           <td colSpan={10} className="px-6 py-4">
-            <div className="grid grid-cols-4 gap-5">
-
-              {/* 成本細節 */}
-              <div className="space-y-2">
-                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">成本細節</h4>
-                <CopyField label={`重量 (g)`}>
-                  <input type="number" value={form.weight_g} onChange={e => set('weight_g', e.target.value)} className={ic} />
-                </CopyField>
-                <CopyField label="包裝費 (NT$)">
-                  <input type="number" value={form.packaging_fee} onChange={e => set('packaging_fee', e.target.value)} className={ic} />
-                </CopyField>
-                <CopyField label="服務費 (%)">
-                  <input type="number" value={form.service_fee_pct} onChange={e => set('service_fee_pct', e.target.value)} className={ic} />
-                </CopyField>
-                <div className="bg-white rounded-lg border border-gray-100 p-2 text-xs space-y-1 text-gray-500">
-                  <div className="flex justify-between"><span>台幣成本</span><span className="font-medium">NT${p.twd_cost?.toFixed(0)}</span></div>
-                  <div className="flex justify-between"><span>運費</span><span className="font-medium">NT${p.shipping_fee?.toFixed(0)}</span></div>
-                  <div className="flex justify-between font-semibold border-t pt-1"><span>落地含手續費</span><span className="text-pink-600">NT${p.total_cost_with_handling?.toFixed(0)}</span></div>
-                </div>
-                <CopyField label="品名（原文）">
-                  <input value={form.product_name} onChange={e => set('product_name', e.target.value)} className={ic} />
-                </CopyField>
-              </div>
-
-              {/* 備註 */}
-              <div className="space-y-2">
-                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">備註</h4>
-                <textarea value={form.notes} onChange={e => set('notes', e.target.value)} rows={8}
-                  className={ic + ' resize-none'} placeholder="備註…" />
-              </div>
-
-              {/* 供應商文案 */}
-              <div className="space-y-2">
-                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">供應商文案</h4>
-                <textarea value={form.supplier_copy} onChange={e => set('supplier_copy', e.target.value)} rows={8}
-                  className={ic + ' resize-none'} placeholder="供應商文案…" />
-              </div>
-
-              {/* 廣告文案 */}
-              <div className="space-y-2">
+            <div className="flex gap-4 items-start">
+              <div className="flex-1 space-y-1.5">
                 <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">廣告文案</h4>
-                <textarea value={form.ad_copy} onChange={e => set('ad_copy', e.target.value)} rows={8}
+                <textarea value={form.ad_copy} onChange={e => set('ad_copy', e.target.value)} rows={6}
                   className={ic + ' resize-none'} placeholder="廣告文案…" />
               </div>
-            </div>
-
-            <div className="flex items-center gap-3 mt-4 pt-3 border-t border-gray-200">
-              <button onClick={handleSave} disabled={saving || !dirty}
-                className="px-5 py-2 bg-pink-500 hover:bg-pink-600 text-white text-sm font-semibold rounded-xl disabled:opacity-40 transition-colors">
-                {saving ? '儲存中…' : dirty ? '儲存所有變更' : '已儲存'}
-              </button>
-              <button onClick={handleDelete} disabled={deleting}
-                className="ml-auto text-red-400 hover:text-red-600 text-sm hover:bg-red-50 px-4 py-2 rounded-xl transition-colors disabled:opacity-40">
-                {deleting ? '刪除中…' : '🗑 刪除此商品'}
-              </button>
+              <div className="flex flex-col gap-2 pt-5 shrink-0">
+                <button onClick={handleSave} disabled={saving || !dirty}
+                  className="px-5 py-2 bg-pink-500 hover:bg-pink-600 text-white text-sm font-semibold rounded-xl disabled:opacity-40 transition-colors">
+                  {saving ? '儲存中…' : dirty ? '儲存' : '已儲存'}
+                </button>
+                <button onClick={handleDelete} disabled={deleting}
+                  className="text-red-400 hover:text-red-600 text-sm hover:bg-red-50 px-4 py-2 rounded-xl transition-colors disabled:opacity-40">
+                  {deleting ? '刪除中…' : '🗑 刪除'}
+                </button>
+              </div>
             </div>
           </td>
         </tr>
@@ -350,7 +343,7 @@ function ProductRow({ product: p, sourcesMap, onSold, onSave, onDelete }: {
   )
 }
 
-function CopyField({ label, children }: { label: string; children: React.ReactNode }) {
+function SmallField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
       <p className="text-[10px] text-gray-400 mb-0.5">{label}</p>
@@ -359,4 +352,5 @@ function CopyField({ label, children }: { label: string; children: React.ReactNo
   )
 }
 
-const ic = 'w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-pink-300 bg-white transition-colors'
+const ic  = 'w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-pink-300 bg-white transition-colors'
+const sic = 'w-20 text-xs border-b border-gray-200 px-1 py-0.5 outline-none focus:border-pink-400 bg-transparent transition-colors'

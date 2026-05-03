@@ -49,6 +49,16 @@ export interface ProductEntry {
   notes: string
 }
 
+export interface ProductVariant {
+  id: string
+  product_id: string
+  label: string
+  stock_quantity: number
+  sold_quantity: number
+  sort_order: number
+  created_at?: string
+}
+
 export interface ExchangeRates {
   THB: number
   JPY: number

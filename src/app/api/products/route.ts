@@ -3,13 +3,19 @@ import { supabase } from '@/lib/supabase'
 import { uploadToR2 } from '@/lib/r2'
 
 export async function GET() {
-  const { data, error } = await supabase
-    .from('products_with_stock')
-    .select('*')
-    .order('created_at', { ascending: false })
+  const [{ data: products, error }, { data: variants }] = await Promise.all([
+    supabase.from('products_with_stock').select('*').order('created_at', { ascending: false }),
+    supabase.from('product_variants').select('*').order('sort_order').order('created_at'),
+  ])
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data)
+  const variantsByProduct: Record<string, any[]> = {}
+  for (const v of variants ?? []) {
+    if (!variantsByProduct[v.product_id]) variantsByProduct[v.product_id] = []
+    variantsByProduct[v.product_id].push(v)
+  }
+  const result = (products ?? []).map(p => ({ ...p, variants: variantsByProduct[p.id] ?? [] }))
+  return NextResponse.json(result)
 }
 
 export async function POST(req: NextRequest) {

@@ -60,7 +60,7 @@ export default function InventoryTable({ products, sourcesMap, settings, onSold,
             <th className="sticky left-12 z-20 bg-gray-50 px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide min-w-[200px] border-r border-gray-200">商品</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-24">來源</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-32 text-right">原始成本</th>
-            <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-28 text-right">落地成本</th>
+            <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-28 text-right">總成本(含手續費)</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-28 text-right">賣價</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-28 text-right">毛利</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-32 text-center">庫存</th>

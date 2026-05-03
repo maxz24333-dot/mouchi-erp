@@ -52,10 +52,10 @@ export default function InventoryTable({ products, sourcesMap, onSold, onSave, o
   return (
     <div className="w-full overflow-x-auto overflow-y-auto max-h-[calc(100vh-320px)]">
       <table className="w-full text-sm">
-        <thead className="sticky top-0 z-10">
+        <thead className="sticky top-0 z-20">
           <tr className="bg-gray-50 border-b border-gray-100 text-left">
-            <th className="px-3 py-3 w-12"></th>
-            <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide min-w-[200px]">商品</th>
+            <th className="sticky left-0 z-20 bg-gray-50 px-3 py-3 w-12"></th>
+            <th className="sticky left-12 z-20 bg-gray-50 px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide min-w-[200px] border-r border-gray-200">商品</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-24">來源</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-28 text-right">原始成本</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-28 text-right">落地成本</th>
@@ -141,10 +141,10 @@ function ProductRow({ product: p, sourcesMap, onSold, onSave, onDelete }: {
   return (
     <Fragment>
       {/* ── Main row ── */}
-      <tr className="border-b border-gray-50 hover:bg-gray-50/40 transition-colors">
+      <tr className="group border-b border-gray-50 hover:bg-gray-50/40 transition-colors">
 
         {/* 圖片 */}
-        <td className="px-3 py-2">
+        <td className="sticky left-0 z-[1] bg-white group-hover:bg-gray-50/40 px-3 py-2 transition-colors">
           <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100">
             {p.image_url
               ? <img src={p.image_url} alt="" className="w-full h-full object-cover" />
@@ -153,7 +153,7 @@ function ProductRow({ product: p, sourcesMap, onSold, onSave, onDelete }: {
         </td>
 
         {/* 商品名稱 */}
-        <td className="px-3 py-2">
+        <td className="sticky left-12 z-[1] bg-white group-hover:bg-gray-50/40 px-3 py-2 border-r border-gray-200 transition-colors">
           <input
             value={form.ai_suggested_name}
             onChange={e => set('ai_suggested_name', e.target.value)}
@@ -285,7 +285,7 @@ function ProductRow({ product: p, sourcesMap, onSold, onSave, onDelete }: {
 
       {/* ── 成本細節 + 備註（永遠顯示） ── */}
       <tr className="border-b border-gray-100 bg-gray-50/40">
-        <td />
+        <td className="sticky left-0 z-[1] bg-gray-50/60 w-12" />
         <td colSpan={9} className="px-3 pb-2.5 pt-1">
           <div className="flex flex-wrap gap-x-5 gap-y-1.5 items-end">
             <SmallField label="重量 (g)">

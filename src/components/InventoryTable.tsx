@@ -50,9 +50,9 @@ export default function InventoryTable({ products, sourcesMap, onSold, onSave, o
   }
 
   return (
-    <div className="w-full overflow-x-auto">
+    <div className="w-full overflow-x-auto overflow-y-auto max-h-[calc(100vh-320px)]">
       <table className="w-full text-sm">
-        <thead>
+        <thead className="sticky top-0 z-10">
           <tr className="bg-gray-50 border-b border-gray-100 text-left">
             <th className="px-3 py-3 w-12"></th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide min-w-[200px]">商品</th>

@@ -50,18 +50,19 @@ export default function InventoryTable({ products, sourcesMap, onSold, onSave, o
   }
 
   return (
-    <div className="w-full overflow-x-auto overflow-y-auto max-h-[calc(100vh-320px)]">
+    <div className="inventory-scroll w-full overflow-x-auto overflow-y-auto max-h-[calc(100vh-320px)]">
       <table className="w-full text-sm">
         <thead className="sticky top-0 z-20">
           <tr className="bg-gray-50 border-b border-gray-100 text-left">
             <th className="sticky left-0 z-20 bg-gray-50 px-3 py-3 w-12"></th>
             <th className="sticky left-12 z-20 bg-gray-50 px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide min-w-[200px] border-r border-gray-200">商品</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-24">來源</th>
-            <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-28 text-right">原始成本</th>
+            <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-32 text-right">原始成本</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-28 text-right">落地成本</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-28 text-right">賣價</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-28 text-right">毛利</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-32 text-center">庫存</th>
+            <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-40">備註</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-24 text-center">戰略</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-36 text-center">操作</th>
           </tr>
@@ -171,15 +172,27 @@ function ProductRow({ product: p, sourcesMap, onSold, onSave, onDelete }: {
         {/* 來源 */}
         <td className="px-3 py-2 text-gray-500 text-xs">{srcLabel}</td>
 
-        {/* 原始成本 */}
+        {/* 原始成本 + 重量 + 包裝費 */}
         <td className="px-3 py-2 text-right">
-          <input
-            type="number"
-            value={form.original_cost}
-            onChange={e => set('original_cost', e.target.value)}
-            className="w-20 text-right text-gray-600 bg-transparent outline-none focus:bg-white focus:border focus:border-pink-200 focus:rounded px-1"
-          />
-          <span className="text-xs text-gray-400 ml-0.5">{currency}</span>
+          <div className="flex items-baseline justify-end gap-0.5">
+            <input
+              type="number"
+              value={form.original_cost}
+              onChange={e => set('original_cost', e.target.value)}
+              className="w-20 text-right text-gray-600 bg-transparent outline-none focus:bg-white focus:border focus:border-pink-200 focus:rounded px-1"
+            />
+            <span className="text-xs text-gray-400">{currency}</span>
+          </div>
+          <div className="flex items-center justify-end gap-2 mt-0.5">
+            <input type="number" value={form.weight_g} onChange={e => set('weight_g', e.target.value)}
+              title="重量 (g)"
+              className="w-12 text-right text-[10px] text-gray-400 bg-transparent outline-none focus:bg-white focus:border focus:border-pink-200 focus:rounded px-0.5" />
+            <span className="text-[10px] text-gray-300">g</span>
+            <input type="number" value={form.packaging_fee} onChange={e => set('packaging_fee', e.target.value)}
+              title="包裝費 (NT$)"
+              className="w-10 text-right text-[10px] text-gray-400 bg-transparent outline-none focus:bg-white focus:border focus:border-pink-200 focus:rounded px-0.5" />
+            <span className="text-[10px] text-gray-300">箱</span>
+          </div>
         </td>
 
         {/* 落地成本 (readonly) */}
@@ -229,6 +242,16 @@ function ProductRow({ product: p, sourcesMap, onSold, onSave, onDelete }: {
             <span className={`font-semibold ml-1 ${stockCls}`}>{remaining}</span>
           </div>
           <p className="text-[10px] text-gray-300 mt-0.5">進 / 售 / 剩</p>
+        </td>
+
+        {/* 備註 */}
+        <td className="px-3 py-2">
+          <input
+            value={form.notes}
+            onChange={e => set('notes', e.target.value)}
+            placeholder="尺碼、規格…"
+            className="w-full text-xs text-gray-500 bg-transparent outline-none focus:bg-white focus:border focus:border-pink-200 focus:rounded px-1 -ml-1"
+          />
         </td>
 
         {/* 戰略 */}
@@ -283,46 +306,28 @@ function ProductRow({ product: p, sourcesMap, onSold, onSave, onDelete }: {
         </td>
       </tr>
 
-      {/* ── 成本細節 + 備註（永遠顯示） ── */}
-      <tr className="border-b border-gray-100 bg-gray-50/40">
-        <td className="sticky left-0 z-[1] bg-gray-50/60 w-12" />
-        <td colSpan={9} className="px-3 pb-2.5 pt-1">
-          <div className="flex flex-wrap gap-x-5 gap-y-1.5 items-end">
-            <SmallField label="重量 (g)">
-              <input type="number" value={form.weight_g} onChange={e => set('weight_g', e.target.value)} className={sic} />
-            </SmallField>
-            <SmallField label="包裝費 (NT$)">
-              <input type="number" value={form.packaging_fee} onChange={e => set('packaging_fee', e.target.value)} className={sic} />
-            </SmallField>
-            <SmallField label="服務費 (%)">
-              <input type="number" value={form.service_fee_pct} onChange={e => set('service_fee_pct', e.target.value)} className={sic} />
-            </SmallField>
-            <SmallField label="品名原文">
-              <input value={form.product_name} onChange={e => set('product_name', e.target.value)} className={sic + ' w-36'} />
-            </SmallField>
-            <div className="text-[10px] text-gray-400 leading-4 self-end pb-0.5">
-              台幣 NT${p.twd_cost?.toFixed(0) ?? '—'} ·
-              運費 NT${p.shipping_fee?.toFixed(0) ?? '—'} ·
-              落地 <span className="text-pink-500 font-semibold">NT${p.total_cost_with_handling?.toFixed(0) ?? '—'}</span>
-            </div>
-            <div className="flex-1 min-w-[180px]">
-              <SmallField label="備註">
-                <input value={form.notes} onChange={e => set('notes', e.target.value)}
-                  placeholder="尺碼、顏色、規格…" className={sic + ' w-full'} />
-              </SmallField>
-            </div>
-          </div>
-        </td>
-      </tr>
-
       {/* ── 廣告文案展開列 ── */}
       {copyOpen && (
         <tr className="bg-blue-50/20 border-b border-blue-100">
-          <td colSpan={10} className="px-6 py-4">
-            <div className="flex gap-4 items-start">
+          <td colSpan={11} className="px-6 py-4">
+            <div className="flex gap-6 items-start">
+              <div className="space-y-1.5">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">成本細節</p>
+                <div className="flex gap-3">
+                  <SmallField label="服務費 (%)">
+                    <input type="number" value={form.service_fee_pct} onChange={e => set('service_fee_pct', e.target.value)} className={sic} />
+                  </SmallField>
+                  <SmallField label="品名原文">
+                    <input value={form.product_name} onChange={e => set('product_name', e.target.value)} className={sic + ' w-44'} />
+                  </SmallField>
+                </div>
+                <p className="text-[10px] text-gray-400">
+                  台幣 NT${p.twd_cost?.toFixed(0) ?? '—'} · 運費 NT${p.shipping_fee?.toFixed(0) ?? '—'} · 落地 <span className="text-pink-500 font-semibold">NT${p.total_cost_with_handling?.toFixed(0) ?? '—'}</span>
+                </p>
+              </div>
               <div className="flex-1 space-y-1.5">
-                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">廣告文案</h4>
-                <textarea value={form.ad_copy} onChange={e => set('ad_copy', e.target.value)} rows={6}
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">廣告文案</p>
+                <textarea value={form.ad_copy} onChange={e => set('ad_copy', e.target.value)} rows={5}
                   className={ic + ' resize-none'} placeholder="廣告文案…" />
               </div>
               <div className="flex flex-col gap-2 pt-5 shrink-0">

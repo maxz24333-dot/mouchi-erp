@@ -371,13 +371,13 @@ function SumCard({ label, value, sub, color }: { label: string; value: string; s
   )
 }
 
-function MobileCard({ label, value, sub, green, red, dim }: {
-  label: string; value: string; sub?: string; green?: boolean; red?: boolean; dim?: boolean
+function MobileCard({ label, value, sub, green, red, dim, indigo }: {
+  label: string; value: string; sub?: string; green?: boolean; red?: boolean; dim?: boolean; indigo?: boolean
 }) {
   return (
     <div className="bg-white rounded-xl border border-gray-100 p-3">
       <p className="text-[10px] text-gray-400 mb-0.5">{label}</p>
-      <p className={`text-base font-bold leading-tight ${green ? 'text-green-600' : red ? 'text-red-500' : dim ? 'text-gray-500' : 'text-gray-800'}`}>{value}</p>
+      <p className={`text-base font-bold leading-tight ${green ? 'text-green-600' : red ? 'text-red-500' : dim ? 'text-gray-500' : indigo ? 'text-indigo-600' : 'text-gray-800'}`}>{value}</p>
       {sub && <p className="text-[10px] text-gray-400 mt-0.5">{sub}</p>}
     </div>
   )

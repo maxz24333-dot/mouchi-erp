@@ -6,6 +6,7 @@ const TABS = [
   { href: '/',          label: '入庫',  icon: '📥' },
   { href: '/inventory', label: '庫存',  icon: '📦' },
   { href: '/reports',   label: '報表',  icon: '📊' },
+  { href: '/logs',      label: '日誌',  icon: '📋' },
   { href: '/settings',  label: '設定',  icon: '⚙️' },
 ]
 

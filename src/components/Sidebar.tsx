@@ -7,6 +7,9 @@ const NAV = [
   { href: '/',          icon: '📥', label: '新增選品' },
   { href: '/inventory', icon: '📦', label: '庫存管理' },
   { href: '/reports',   icon: '📊', label: '進銷存報表' },
+  { href: '/logs',      icon: '📋', label: '庫存異動日誌' },
+  { href: '/customers', icon: '👤', label: '客戶管理' },
+  { href: '/suppliers', icon: '🏭', label: '供應商管理' },
   { href: '/settings',  icon: '⚙️', label: '系統設定' },
 ]
 

@@ -1,5 +1,5 @@
 'use client'
-import { useState, useRef } from 'react'
+import { useState } from 'react'
 import type { SourceRow } from '@/types'
 const STRATEGY_CONFIG = {
   lead:   { label: '📣 引流品', color: 'bg-blue-100 text-blue-700' },
@@ -16,8 +16,12 @@ interface Props {
   product: any
   sourcesMap: Record<string, SourceRow>
   isWholesale?: boolean
+  selected?: boolean
   onSold: (id: string, qty: number, opts?: { buyer?: string; unitPrice?: number; variantId?: string }) => void
   onSave: (id: string, edits: Record<string, any>) => Promise<void>
+  onClone?: (id: string) => void
+  onAdjust?: (id: string) => void
+  onToggle?: (id: string) => void
 }
 
 function initForm(p: any) {
@@ -44,7 +48,7 @@ function isDirty(form: Record<string, string>, product: any) {
   return Object.keys(orig).some(k => form[k] !== orig[k])
 }
 
-export default function ProductCard({ product, sourcesMap, isWholesale, onSold, onSave }: Props) {
+export default function ProductCard({ product, sourcesMap, isWholesale, selected, onSold, onSave, onClone, onAdjust, onToggle }: Props) {
   const [form, setForm]         = useState<Record<string, string>>(() => initForm(product))
   const [saving, setSaving]     = useState(false)
   const [soldQty, setSoldQty]   = useState(1)
@@ -66,6 +70,13 @@ export default function ProductCard({ product, sourcesMap, isWholesale, onSold, 
     ? sellingPrice - product.total_cost_with_handling : null
   const margin = profit !== null && sellingPrice
     ? (profit / sellingPrice * 100).toFixed(1) : null
+
+  // Stale detection
+  const daysSince = product.created_at ? Math.floor((Date.now() - new Date(product.created_at).getTime()) / 86400000) : 0
+  const totalSold = parseInt(form.sold_quantity) || 0
+  const totalStock = parseInt(form.stock_quantity) || 0
+  const totalRemaining = totalStock - totalSold
+  const isStale = totalRemaining > 0 && totalSold === 0 && daysSince >= 45
 
   const set = (k: string, v: string) => setForm(prev => ({ ...prev, [k]: v }))
 
@@ -91,23 +102,34 @@ export default function ProductCard({ product, sourcesMap, isWholesale, onSold, 
   }
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+    <div className={`bg-white rounded-2xl shadow-sm overflow-hidden ${selected ? 'ring-2 ring-pink-400' : ''}`}>
 
       {/* ── Header row ── */}
       <div className="flex gap-3 p-3">
-        <div className="w-14 h-14 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">
+        <div
+          className={`w-14 h-14 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0 relative ${onToggle ? 'cursor-pointer' : ''}`}
+          onClick={onToggle ? () => onToggle(product.id) : undefined}
+        >
           {product.image_url
             ? <img src={product.image_url} alt={name} className="w-full h-full object-cover" />
             : <div className="w-full h-full flex items-center justify-center text-2xl">👗</div>}
+          {selected && (
+            <div className="absolute inset-0 bg-pink-500/70 flex items-center justify-center">
+              <span className="text-white font-bold text-lg">✓</span>
+            </div>
+          )}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-start gap-1 justify-between">
-            <input
-              value={form.ai_suggested_name}
-              onChange={e => set('ai_suggested_name', e.target.value)}
-              placeholder="AI販售名稱"
-              className="flex-1 text-sm font-semibold text-gray-800 bg-transparent outline-none focus:bg-pink-50 focus:rounded px-1 -ml-1 min-w-0"
-            />
+            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+              <input
+                value={form.ai_suggested_name}
+                onChange={e => set('ai_suggested_name', e.target.value)}
+                placeholder="AI販售名稱"
+                className="flex-1 text-sm font-semibold text-gray-800 bg-transparent outline-none focus:bg-pink-50 focus:rounded px-1 -ml-1 min-w-0"
+              />
+              {isStale && <span className="text-[10px] bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap flex-shrink-0">滯銷?</span>}
+            </div>
             <select
               value={form.strategy_tag}
               onChange={e => set('strategy_tag', e.target.value)}
@@ -257,6 +279,24 @@ export default function ProductCard({ product, sourcesMap, isWholesale, onSold, 
             {saving ? '儲存中…' : dirty ? '儲存變更' : '已儲存'}
           </button>
         </div>
+
+        {/* ── 複製 / 調整（第二行按鈕） ── */}
+        {(onClone || onAdjust) && (
+          <div className="flex gap-2">
+            {onClone && (
+              <button type="button" onClick={() => onClone(product.id)}
+                className="flex-1 py-2 text-xs font-medium rounded-xl bg-blue-50 text-blue-600 active:bg-blue-100">
+                📋 複製商品
+              </button>
+            )}
+            {onAdjust && (
+              <button type="button" onClick={() => onAdjust(product.id)}
+                className="flex-1 py-2 text-xs font-medium rounded-xl bg-amber-50 text-amber-600 active:bg-amber-100">
+                ⚖️ 庫存調整
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

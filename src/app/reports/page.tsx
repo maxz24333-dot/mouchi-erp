@@ -42,6 +42,7 @@ export default function ReportsPage() {
   const [customTo, setCustomTo]     = useState('')
   const [loading, setLoading]       = useState(true)
   const [data, setData]             = useState<any>(null)
+  const [exporting, setExporting]   = useState(false)
 
   // Expense state
   const [expenses, setExpenses]     = useState<any[]>([])
@@ -73,6 +74,26 @@ export default function ReportsPage() {
   const [savingRec, setSavingRec]   = useState(false)
 
   const { from, to } = periodDates(period, customFrom, customTo)
+
+  async function handleExportExcel() {
+    setExporting(true)
+    try {
+      const params = new URLSearchParams({ brand })
+      if (from) params.set('from', from)
+      if (to)   params.set('to', to)
+      const res = await fetch(`/api/export-reports?${params}`)
+      if (!res.ok) throw new Error()
+      const blob = await res.blob()
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href = url
+      const cd = res.headers.get('Content-Disposition')
+      const match = cd?.match(/filename\*=UTF-8''(.+)/) || cd?.match(/filename="(.+)"/)
+      a.download = match ? decodeURIComponent(match[1]) : 'MOUCHI_報表.xlsx'
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally { setExporting(false) }
+  }
 
   const fetchReport = useCallback(async () => {
     setLoading(true)
@@ -457,7 +478,13 @@ export default function ReportsPage() {
           <h1 className="text-xl font-bold text-gray-900">進銷存報表</h1>
           <p className="text-sm text-gray-500 mt-0.5">銷售、利潤、開銷分析</p>
         </div>
-        {brandTabs()}
+        <div className="flex items-center gap-3">
+          <button onClick={handleExportExcel} disabled={exporting}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-emerald-700 bg-emerald-50 rounded-xl hover:bg-emerald-100 transition disabled:opacity-50">
+            📊 {exporting ? '匯出中…' : '匯出 Excel'}
+          </button>
+          {brandTabs()}
+        </div>
       </div>
 
       {periodTabs()}
@@ -576,7 +603,13 @@ export default function ReportsPage() {
   const mobileContent = (
     <div className="min-h-screen pb-6">
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-gray-100 px-4 py-3">
-        <h1 className="text-base font-bold text-gray-800 mb-2">進銷存報表</h1>
+        <div className="flex items-center justify-between mb-2">
+          <h1 className="text-base font-bold text-gray-800">進銷存報表</h1>
+          <button onClick={handleExportExcel} disabled={exporting}
+            className="text-xs text-emerald-600 font-medium bg-emerald-50 px-3 py-1.5 rounded-full disabled:opacity-50">
+            {exporting ? '匯出中…' : '📊 Excel'}
+          </button>
+        </div>
         {periodTabs(true)}
       </header>
 

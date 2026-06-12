@@ -13,9 +13,13 @@ interface Props {
   sourcesMap: Record<string, SourceRow>
   settings: Settings
   isWholesale?: boolean
+  selectedIds?: Set<string>
+  onToggle?: (id: string) => void
   onSold: (id: string, qty: number, opts?: { buyer?: string; unitPrice?: number; variantId?: string }) => void
   onSave: (id: string, edits: Record<string, any>) => Promise<void>
   onDelete: (id: string) => Promise<void>
+  onClone?: (id: string) => void
+  onAdjust?: (id: string) => void
 }
 
 function initForm(p: any) {
@@ -42,7 +46,7 @@ function isDirty(form: Record<string, string>, p: any) {
   return Object.keys(orig).some(k => form[k] !== orig[k])
 }
 
-export default function InventoryTable({ products, sourcesMap, settings, isWholesale, onSold, onSave, onDelete }: Props) {
+export default function InventoryTable({ products, sourcesMap, settings, isWholesale, selectedIds, onToggle, onSold, onSave, onDelete, onClone, onAdjust }: Props) {
   if (products.length === 0) {
     return (
       <div className="text-center py-20 text-gray-400">
@@ -72,7 +76,9 @@ export default function InventoryTable({ products, sourcesMap, settings, isWhole
         </thead>
         <tbody>
           {products.map(p => (
-            <ProductRow key={p.id} product={p} sourcesMap={sourcesMap} settings={settings} isWholesale={isWholesale} onSold={onSold} onSave={onSave} onDelete={onDelete} />
+            <ProductRow key={p.id} product={p} sourcesMap={sourcesMap} settings={settings} isWholesale={isWholesale}
+              selected={selectedIds?.has(p.id) ?? false} onToggle={onToggle}
+              onSold={onSold} onSave={onSave} onDelete={onDelete} onClone={onClone} onAdjust={onAdjust} />
           ))}
         </tbody>
       </table>
@@ -80,14 +86,18 @@ export default function InventoryTable({ products, sourcesMap, settings, isWhole
   )
 }
 
-function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onSave, onDelete }: {
+function ProductRow({ product: p, sourcesMap, settings, isWholesale, selected, onToggle, onSold, onSave, onDelete, onClone, onAdjust }: {
   product: any
   sourcesMap: Record<string, SourceRow>
   settings: Settings
   isWholesale?: boolean
+  selected?: boolean
+  onToggle?: (id: string) => void
   onSold: (id: string, qty: number, opts?: { buyer?: string; unitPrice?: number; variantId?: string }) => void
   onSave: (id: string, edits: Record<string, any>) => Promise<void>
   onDelete: (id: string) => Promise<void>
+  onClone?: (id: string) => void
+  onAdjust?: (id: string) => void
 }) {
   const [form, setForm]         = useState<Record<string, string>>(() => initForm(p))
   const [saving, setSaving]     = useState(false)
@@ -97,7 +107,6 @@ function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onS
   const [soldQty, setSoldQty]   = useState(1)
   const [soldOpen, setSoldOpen] = useState(false)
 
-  // variants
   const [variants, setVariants] = useState<ProductVariant[]>(p.variants ?? [])
   const [newLabel, setNewLabel] = useState('')
   const [newStock, setNewStock] = useState('1')
@@ -116,14 +125,12 @@ function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onS
   const srcLabel = srcInfo?.label ?? p.source ?? '—'
   const strategy = form.strategy_tag ? STRATEGY_CONFIG[form.strategy_tag] : null
 
-  // Use fresh rate from sourcesMap (auto-refreshed), apply buffer except for fixed-rate currencies (KRW)
   const rawSourceRate = srcInfo?.exchange_rate ?? 0
   const isFixedRate   = srcInfo?.currency === 'KRW'
   const effectiveRate = rawSourceRate > 0
     ? (isFixedRate ? rawSourceRate : rawSourceRate * settings.exchange_rate_buffer)
     : 0
 
-  // live cost computation — recalculates whenever form changes
   const liveCost = (parseFloat(form.original_cost) > 0 && effectiveRate > 0)
     ? calcCost({
         originalCost:   parseFloat(form.original_cost) || 0,
@@ -142,10 +149,14 @@ function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onS
   const margin  = profit !== null && sellingPrice ? profit / sellingPrice * 100 : null
   const marginCls = margin === null ? 'text-gray-300' : margin >= 30 ? 'text-green-600' : margin < 0 ? 'text-red-500' : 'text-amber-500'
 
-  const totalStock    = hasVariants ? variants.reduce((s, v) => s + v.stock_quantity, 0) : (parseInt(form.stock_quantity) || 0)
-  const totalSold     = hasVariants ? variants.reduce((s, v) => s + v.sold_quantity,  0) : (parseInt(form.sold_quantity)  || 0)
+  const totalStock     = hasVariants ? variants.reduce((s, v) => s + v.stock_quantity, 0) : (parseInt(form.stock_quantity) || 0)
+  const totalSold      = hasVariants ? variants.reduce((s, v) => s + v.sold_quantity,  0) : (parseInt(form.sold_quantity)  || 0)
   const totalRemaining = totalStock - totalSold
   const stockCls = totalRemaining === 0 ? 'text-red-400' : totalRemaining <= 3 ? 'text-amber-500' : 'text-gray-700'
+
+  // Stale detection: has stock, never sold, added 45+ days ago
+  const daysSince = p.created_at ? Math.floor((Date.now() - new Date(p.created_at).getTime()) / 86400000) : 0
+  const isStale   = totalRemaining > 0 && totalSold === 0 && daysSince >= 45
 
   const set = (k: string, v: string) => setForm(prev => ({ ...prev, [k]: v }))
 
@@ -189,12 +200,10 @@ function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onS
 
   async function handleAddVariant() {
     if (!newLabel.trim()) return
-    setAddingV(true)
-    setVariantError(null)
+    setAddingV(true); setVariantError(null)
     try {
       const res = await fetch(`/api/products/${p.id}/variants`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ label: newLabel.trim(), stock_quantity: parseInt(newStock) || 0 }),
       })
       if (res.ok) {
@@ -211,9 +220,7 @@ function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onS
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
         setVariantError(err.error ?? '新增失敗')
       }
-    } catch (e) {
-      setVariantError(String(e))
-    }
+    } catch (e) { setVariantError(String(e)) }
     setAddingV(false)
   }
 
@@ -238,8 +245,7 @@ function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onS
     const v = variants.find(vv => vv.id === vid)
     if (!v) return
     await fetch(`/api/products/${p.id}/variants/${vid}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ stock_quantity: v.stock_quantity, sold_quantity: v.sold_quantity }),
     })
     setForm(prev => ({
@@ -255,8 +261,7 @@ function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onS
     if (!v) return
     const newSold = v.sold_quantity + soldVariantQty
     const res = await fetch(`/api/products/${p.id}/variants/${soldVariantId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sold_quantity: newSold }),
     })
     if (res.ok) {
@@ -269,25 +274,40 @@ function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onS
   return (
     <Fragment>
       {/* ── Main row ── */}
-      <tr className="group border-b border-gray-50 hover:bg-gray-50/40 transition-colors">
+      <tr className={`group border-b border-gray-50 hover:bg-gray-50/40 transition-colors ${selected ? 'bg-pink-50/30' : ''}`}>
 
-        {/* 圖片 */}
-        <td className="sticky left-0 z-[1] bg-white group-hover:bg-gray-50/40 px-3 py-2 transition-colors">
-          <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100">
+        {/* 圖片（+批量選取overlay） */}
+        <td className="sticky left-0 z-[1] bg-white group-hover:bg-gray-50/40 px-3 py-2 transition-colors" style={selected?{backgroundColor:'rgb(253 242 248 / 0.3)'}:{}}>
+          <div
+            className={`w-10 h-10 rounded-lg overflow-hidden bg-gray-100 relative ${onToggle ? 'cursor-pointer' : ''}`}
+            onClick={onToggle ? () => onToggle(p.id) : undefined}
+          >
             {p.image_url
               ? <img src={p.image_url} alt="" className="w-full h-full object-cover" />
               : <div className="w-full h-full flex items-center justify-center text-base">👗</div>}
+            {selected && (
+              <div className="absolute inset-0 bg-pink-500/70 flex items-center justify-center">
+                <span className="text-white font-bold text-sm">✓</span>
+              </div>
+            )}
           </div>
         </td>
 
-        {/* 商品名稱 */}
+        {/* 商品名稱 + 滯銷徽章 */}
         <td className="sticky left-12 z-[1] bg-white group-hover:bg-gray-50/40 px-3 py-2 border-r border-gray-200 transition-colors">
-          <input
-            value={form.ai_suggested_name}
-            onChange={e => set('ai_suggested_name', e.target.value)}
-            placeholder="AI販售名稱"
-            className="w-full font-medium text-gray-800 bg-transparent outline-none focus:bg-white focus:border focus:border-pink-200 focus:rounded px-1 -ml-1"
-          />
+          <div className="flex items-center gap-1.5">
+            <input
+              value={form.ai_suggested_name}
+              onChange={e => set('ai_suggested_name', e.target.value)}
+              placeholder="AI販售名稱"
+              className="flex-1 font-medium text-gray-800 bg-transparent outline-none focus:bg-white focus:border focus:border-pink-200 focus:rounded px-1 -ml-1 min-w-0"
+            />
+            {isStale && (
+              <span className="flex-shrink-0 text-[10px] bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap">
+                滯銷?
+              </span>
+            )}
+          </div>
           <input
             value={form.product_code}
             onChange={e => set('product_code', e.target.value)}
@@ -302,27 +322,21 @@ function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onS
         {/* 原始成本 + 重量 + 包裝費 */}
         <td className="px-3 py-2 text-right">
           <div className="flex items-baseline justify-end gap-0.5">
-            <input
-              type="number"
-              value={form.original_cost}
-              onChange={e => set('original_cost', e.target.value)}
-              className="w-20 text-right text-gray-600 bg-transparent outline-none focus:bg-white focus:border focus:border-pink-200 focus:rounded px-1"
-            />
+            <input type="number" value={form.original_cost} onChange={e => set('original_cost', e.target.value)}
+              className="w-20 text-right text-gray-600 bg-transparent outline-none focus:bg-white focus:border focus:border-pink-200 focus:rounded px-1" />
             <span className="text-xs text-gray-400">{currency}</span>
           </div>
           <div className="flex items-center justify-end gap-2 mt-0.5">
-            <input type="number" value={form.weight_g} onChange={e => set('weight_g', e.target.value)}
-              title="重量 (g)"
+            <input type="number" value={form.weight_g} onChange={e => set('weight_g', e.target.value)} title="重量 (g)"
               className="w-12 text-right text-[10px] text-gray-400 bg-transparent outline-none focus:bg-white focus:border focus:border-pink-200 focus:rounded px-0.5" />
             <span className="text-[10px] text-gray-300">g</span>
-            <input type="number" value={form.packaging_fee} onChange={e => set('packaging_fee', e.target.value)}
-              title="包裝費 (NT$)"
+            <input type="number" value={form.packaging_fee} onChange={e => set('packaging_fee', e.target.value)} title="包裝費 (NT$)"
               className="w-10 text-right text-[10px] text-gray-400 bg-transparent outline-none focus:bg-white focus:border focus:border-pink-200 focus:rounded px-0.5" />
             <span className="text-[10px] text-gray-300">箱</span>
           </div>
         </td>
 
-        {/* 落地成本 (即時計算) */}
+        {/* 落地成本 */}
         <td className="px-3 py-2 text-right font-medium text-gray-600 text-sm">
           NT${(liveCost?.totalCostWithHandling ?? p.total_cost_with_handling)?.toFixed(0) ?? '—'}
         </td>
@@ -330,12 +344,8 @@ function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onS
         {/* 賣價 */}
         <td className="px-3 py-2 text-right">
           <span className="text-xs text-gray-400">NT$</span>
-          <input
-            type="number"
-            value={form.my_selling_price}
-            onChange={e => set('my_selling_price', e.target.value)}
-            className="w-16 text-right font-semibold text-gray-800 bg-transparent outline-none focus:bg-white focus:border focus:border-pink-200 focus:rounded px-1"
-          />
+          <input type="number" value={form.my_selling_price} onChange={e => set('my_selling_price', e.target.value)}
+            className="w-16 text-right font-semibold text-gray-800 bg-transparent outline-none focus:bg-white focus:border focus:border-pink-200 focus:rounded px-1" />
         </td>
 
         {/* 毛利 */}
@@ -372,22 +382,15 @@ function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onS
 
         {/* 備註 */}
         <td className="px-3 py-2">
-          <input
-            value={form.notes}
-            onChange={e => set('notes', e.target.value)}
-            placeholder="尺碼、規格…"
-            className="w-full text-xs text-gray-500 bg-transparent outline-none focus:bg-white focus:border focus:border-pink-200 focus:rounded px-1 -ml-1"
-          />
+          <input value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="尺碼、規格…"
+            className="w-full text-xs text-gray-500 bg-transparent outline-none focus:bg-white focus:border focus:border-pink-200 focus:rounded px-1 -ml-1" />
         </td>
 
         {/* 戰略 */}
         {!isWholesale && (
           <td className="px-3 py-2 text-center">
-            <select
-              value={form.strategy_tag}
-              onChange={e => set('strategy_tag', e.target.value)}
-              className={`text-xs px-2 py-0.5 rounded-full font-medium border-0 outline-none cursor-pointer ${strategy ? strategy.cls : 'bg-gray-100 text-gray-400'}`}
-            >
+            <select value={form.strategy_tag} onChange={e => set('strategy_tag', e.target.value)}
+              className={`text-xs px-2 py-0.5 rounded-full font-medium border-0 outline-none cursor-pointer ${strategy ? strategy.cls : 'bg-gray-100 text-gray-400'}`}>
               <option value="">— 未設</option>
               <option value="profit">💰 利潤</option>
               <option value="lead">📣 引流</option>
@@ -399,14 +402,14 @@ function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onS
         {/* 操作 */}
         <td className="px-3 py-2 text-center">
           <div className="flex items-center justify-center gap-1 flex-wrap">
-            {/* 出貨 — 無規格版 */}
             {!hasVariants && (soldOpen ? (
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-1">
                   <button onClick={() => setSoldQty(v => Math.max(1, v - 1))} className="w-5 h-5 rounded bg-gray-100 text-xs hover:bg-gray-200">−</button>
                   <span className="text-xs font-medium w-4 text-center">{soldQty}</span>
                   <button onClick={() => setSoldQty(v => Math.min(p.remaining_stock, v + 1))} className="w-5 h-5 rounded bg-gray-100 text-xs hover:bg-gray-200">+</button>
-                  <button onClick={() => { onSold(p.id, soldQty, isWholesale ? { buyer: wholeBuyer, unitPrice: parseFloat(wholePrice) || undefined } : undefined); setSoldOpen(false); setWholeBuyer(''); setWholePrice('') }} className="text-xs text-white bg-pink-500 px-1.5 py-0.5 rounded">✓</button>
+                  <button onClick={() => { onSold(p.id, soldQty, isWholesale ? { buyer: wholeBuyer, unitPrice: parseFloat(wholePrice) || undefined } : undefined); setSoldOpen(false); setWholeBuyer(''); setWholePrice('') }}
+                    className="text-xs text-white bg-pink-500 px-1.5 py-0.5 rounded">✓</button>
                   <button onClick={() => setSoldOpen(false)} className="text-xs text-gray-400">✕</button>
                 </div>
                 {isWholesale && (
@@ -417,8 +420,7 @@ function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onS
                 )}
               </div>
             ) : (
-              <button onClick={() => { setSoldOpen(true); setSoldQty(1) }}
-                disabled={totalRemaining === 0}
+              <button onClick={() => { setSoldOpen(true); setSoldQty(1) }} disabled={totalRemaining === 0}
                 className="text-xs text-pink-500 hover:text-pink-700 font-medium disabled:text-gray-300 px-2 py-1 rounded hover:bg-pink-50 disabled:cursor-not-allowed">
                 出貨
               </button>
@@ -446,7 +448,6 @@ function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onS
             <div className="space-y-2">
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">規格庫存管理</p>
 
-              {/* 出貨（規格版）— 選規格再出貨 */}
               {hasVariants && (
                 <div className="mb-3 pb-3 border-b border-purple-100 space-y-2">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -477,7 +478,6 @@ function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onS
                 </div>
               )}
 
-              {/* 規格列表 */}
               <div className="space-y-1.5">
                 {variants.map(v => {
                   const rem = v.stock_quantity - v.sold_quantity
@@ -497,8 +497,7 @@ function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onS
                         className="w-14 text-center text-sm text-gray-400 border-b border-gray-200 outline-none focus:border-purple-400 bg-transparent" />
                       <span className="text-[10px] text-gray-400">剩</span>
                       <span className={`text-sm font-bold w-8 ${cls}`}>{rem}</span>
-                      <button onClick={() => handleDeleteVariant(v.id)}
-                        className="ml-auto text-[10px] text-red-400 hover:text-red-600 px-2 py-0.5 rounded hover:bg-red-50">
+                      <button onClick={() => handleDeleteVariant(v.id)} className="ml-auto text-[10px] text-red-400 hover:text-red-600 px-2 py-0.5 rounded hover:bg-red-50">
                         刪除
                       </button>
                     </div>
@@ -506,7 +505,6 @@ function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onS
                 })}
               </div>
 
-              {/* 新增規格 */}
               <div className="flex items-center gap-2 pt-1 flex-wrap">
                 <input value={newLabel} onChange={e => { setNewLabel(e.target.value); setVariantError(null) }}
                   placeholder="規格名稱（如 S / 紅色）"
@@ -518,16 +516,14 @@ function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onS
                   className="text-xs bg-purple-500 text-white px-3 py-1.5 rounded-lg disabled:opacity-40">
                   {addingV ? '新增中…' : '＋ 新增規格'}
                 </button>
-                {variantError && (
-                  <span className="text-xs text-red-500 font-medium">{variantError}</span>
-                )}
+                {variantError && <span className="text-xs text-red-500 font-medium">{variantError}</span>}
               </div>
             </div>
           </td>
         </tr>
       )}
 
-      {/* ── 廣告文案展開列 ── */}
+      {/* ── 廣告文案展開列（含複製/調整按鈕） ── */}
       {copyOpen && (
         <tr className="bg-blue-50/20 border-b border-blue-100">
           <td colSpan={11} className="px-6 py-4">
@@ -556,6 +552,18 @@ function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onS
                   className="px-5 py-2 bg-pink-500 hover:bg-pink-600 text-white text-sm font-semibold rounded-xl disabled:opacity-40 transition-colors">
                   {saving ? '儲存中…' : dirty ? '儲存' : '已儲存'}
                 </button>
+                {onClone && (
+                  <button onClick={() => onClone(p.id)}
+                    className="px-5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 text-sm font-medium rounded-xl transition-colors">
+                    📋 複製商品
+                  </button>
+                )}
+                {onAdjust && (
+                  <button onClick={() => onAdjust(p.id)}
+                    className="px-5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-600 text-sm font-medium rounded-xl transition-colors">
+                    ⚖️ 庫存調整
+                  </button>
+                )}
                 <button onClick={handleDelete} disabled={deleting}
                   className="text-red-400 hover:text-red-600 text-sm hover:bg-red-50 px-4 py-2 rounded-xl transition-colors disabled:opacity-40">
                   {deleting ? '刪除中…' : '🗑 刪除'}

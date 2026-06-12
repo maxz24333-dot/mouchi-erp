@@ -49,7 +49,7 @@ function fmt(n: number) {
 function pct(n: number) { return `${(n * 100).toFixed(1)}%` }
 
 export default function ReportsPage() {
-  const [period, setPeriod]         = useState<Period>('this_month')
+  const [period, setPeriod]         = useState<Period>('all')
   const [brand, setBrand]           = useState<BrandFilter>('all')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo]     = useState('')

@@ -126,25 +126,28 @@ export default function ReportsPage() {
   }
 
   async function addRecord() {
-    if (!recProductId || !recQty) return
+    if (!productSearch.trim() || !recQty) return
     setSavingRec(true)
     try {
+      const pid = recProductId || null
+      const nameNote = pid ? null : productSearch.trim()
       if (recType === 'purchase') {
         await fetch('/api/purchase-logs', {
           method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify({
-            product_id: recProductId,
+            product_id: pid,
             brand: recBrand,
             quantity: parseInt(recQty),
             unit_cost: recCost ? parseFloat(recCost) : null,
             supplier: recSupplier || null,
+            note: nameNote,
             date: recDate,
           }),
         })
       } else {
         const endpoint = recBrand === 'wholesale' ? '/api/shipment-logs' : '/api/sales-logs'
         const body: any = {
-          product_id: recProductId,
+          product_id: pid,
           brand: recBrand,
           quantity: parseInt(recQty),
           unit_price: recPrice ? parseFloat(recPrice) : null,
@@ -317,7 +320,7 @@ export default function ReportsPage() {
           </div>
 
           <div>
-            <label className="text-xs text-gray-500 mb-1 block">商品（搜尋名稱或編號）</label>
+            <label className="text-xs text-gray-500 mb-1 block">商品（搜尋名稱或編號，找不到可直接輸入）</label>
             <input type="text" placeholder="輸入商品名稱搜尋…" value={productSearch}
               onChange={e => { setProductSearch(e.target.value); setRecProduct(''); setRecProductId('') }}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
@@ -339,6 +342,9 @@ export default function ReportsPage() {
               </div>
             )}
             {recProductId && <p className="text-xs text-green-600 mt-1">✓ 已選：{recProduct}</p>}
+            {productSearch && !recProductId && filteredProducts.length === 0 && products.length > 0 && (
+              <p className="text-xs text-amber-600 mt-1">找不到符合商品，將以「{productSearch}」為名稱直接存入</p>
+            )}
           </div>
 
           {recType === 'sale' ? (
@@ -383,7 +389,7 @@ export default function ReportsPage() {
             </div>
           )}
 
-          <button onClick={addRecord} disabled={savingRec || !recProductId}
+          <button onClick={addRecord} disabled={savingRec || !productSearch.trim()}
             className="w-full py-2.5 bg-gray-800 text-white text-sm rounded-xl hover:bg-gray-700 disabled:opacity-40 font-medium">
             {savingRec ? '儲存中…' : `新增這筆${recType === 'sale' ? '出貨' : '進貨'}記錄`}
           </button>

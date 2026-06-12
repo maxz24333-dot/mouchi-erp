@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 
+async function getBrandIds(brand: string): Promise<string[] | null> {
+  if (brand === 'all') return null
+  const { data } = await supabase.from('products').select('id').eq('brand', brand)
+  return (data ?? []).map((p: any) => p.id)
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const brand = searchParams.get('brand') || 'all'
@@ -33,7 +39,7 @@ export async function GET(req: NextRequest) {
             })
           }
         }
-      } catch { /* sales_logs table may not exist yet */ }
+      } catch { /* sales_logs may not exist yet */ }
     }
 
     // ── Wholesale: shipment_logs ─────────────────────────────────────
@@ -57,66 +63,58 @@ export async function GET(req: NextRequest) {
             })
           }
         }
-      } catch { /* shipment_logs may not exist */ }
-    }
-
-    // ── Fallback: derive lifetime totals from products table ─────────
-    // Used when no log records exist (before sales_logs is populated)
-    let usedFallback = false
-    let fallbackSummary = { revenue: 0, cogs: 0, qty: 0 }
-
-    if (rows.length === 0 && !hasDateFilter) {
-      try {
-        let q = supabase
-          .from('products_with_stock')
-          .select('id, ai_suggested_name, product_name, my_selling_price, total_cost_with_handling, sold_quantity')
-
-        if (brand !== 'all') {
-          const { data: brandIds } = await supabase.from('products').select('id').eq('brand', brand)
-          const ids = (brandIds ?? []).map((p: any) => p.id)
-          if (ids.length > 0) q = q.in('id', ids)
-          else q = q.in('id', [])
-        }
-
-        const { data: products } = await q
-        for (const p of (products ?? []) as any[]) {
-          const qty = p.sold_quantity ?? 0
-          if (qty > 0) {
-            fallbackSummary.revenue += (p.my_selling_price ?? 0) * qty
-            fallbackSummary.cogs    += (p.total_cost_with_handling ?? 0) * qty
-            fallbackSummary.qty     += qty
-          }
-        }
-        usedFallback = true
       } catch { /* ignore */ }
     }
 
-    // ── Inventory value (always current, independent of period) ─────
-    let inventoryValue = 0
-    let totalProcured  = 0
+    // ── Summary: for 全部 always use products.sold_quantity baseline ──
+    // For dated periods, sum from log rows
+    let summaryRevenue = 0
+    let summaryCogs    = 0
+    let summaryQty     = 0
+    let usedBaseline   = false
+
+    if (!hasDateFilter) {
+      // Always use products table for all-time summary (covers history before logging)
+      try {
+        let q = supabase
+          .from('products_with_stock')
+          .select('my_selling_price, total_cost_with_handling, sold_quantity')
+        const ids = await getBrandIds(brand)
+        if (ids !== null) {
+          if (ids.length > 0) q = q.in('id', ids)
+          else q = q.in('id', [])
+        }
+        const { data: prods } = await q
+        for (const p of (prods ?? []) as any[]) {
+          const qty = p.sold_quantity ?? 0
+          summaryRevenue += (p.my_selling_price ?? 0) * qty
+          summaryCogs    += (p.total_cost_with_handling ?? 0) * qty
+          summaryQty     += qty
+        }
+        usedBaseline = true
+      } catch { /* ignore, fall back to rows */ }
+    }
+
+    if (!usedBaseline) {
+      summaryRevenue = rows.reduce((s, r) => s + r.revenue, 0)
+      summaryCogs    = rows.reduce((s, r) => s + r.cogs, 0)
+      summaryQty     = rows.reduce((s, r) => s + r.qty, 0)
+    }
+
+    const summaryProfit = summaryRevenue - summaryCogs
+
+    // ── Expenses (same date range) ───────────────────────────────────
+    let totalExpenses = 0
     try {
-      let ivq = supabase
-        .from('products_with_stock')
-        .select('remaining_stock, total_cost_with_handling, stock_quantity')
-      if (brand !== 'all') {
-        const { data: bids } = await supabase.from('products').select('id').eq('brand', brand)
-        const ids = (bids ?? []).map((p: any) => p.id)
-        if (ids.length > 0) ivq = ivq.in('id', ids)
-        else ivq = ivq.in('id', [])
-      }
-      const { data: ivData } = await ivq
-      for (const p of (ivData ?? []) as any[]) {
-        inventoryValue += (p.total_cost_with_handling ?? 0) * (p.remaining_stock ?? 0)
-        totalProcured  += (p.total_cost_with_handling ?? 0) * (p.stock_quantity ?? 0)
-      }
-    } catch { /* ignore */ }
+      let eq = supabase.from('expenses').select('amount, date')
+      if (brand !== 'all') eq = eq.eq('brand', brand)
+      if (from) eq = eq.gte('date', from)
+      if (to)   eq = eq.lte('date', to)
+      const { data: expData } = await eq
+      totalExpenses = (expData ?? []).reduce((s: number, e: any) => s + (e.amount ?? 0), 0)
+    } catch { /* expenses table may not exist */ }
 
-    // ── Aggregate ────────────────────────────────────────────────────
-    const totalRevenue = usedFallback ? fallbackSummary.revenue : rows.reduce((s, r) => s + r.revenue, 0)
-    const totalCogs    = usedFallback ? fallbackSummary.cogs    : rows.reduce((s, r) => s + r.cogs, 0)
-    const totalProfit  = totalRevenue - totalCogs
-    const totalQty     = usedFallback ? fallbackSummary.qty     : rows.reduce((s, r) => s + r.qty, 0)
-
+    // ── Monthly breakdown (from logs only) ───────────────────────────
     const monthMap: Record<string, { revenue: number; cogs: number; count: number; qty: number }> = {}
     for (const r of rows) {
       const month = r.date.slice(0, 7)
@@ -138,6 +136,7 @@ export async function GET(req: NextRequest) {
         margin:  v.revenue > 0 ? (v.revenue - v.cogs) / v.revenue : 0,
       }))
 
+    // ── Top products (from logs) ─────────────────────────────────────
     const productMap: Record<string, { name: string; qty: number; revenue: number; cogs: number }> = {}
     for (const r of rows) {
       if (!productMap[r.name]) productMap[r.name] = { name: r.name, qty: 0, revenue: 0, cogs: 0 }
@@ -150,19 +149,38 @@ export async function GET(req: NextRequest) {
       .slice(0, 10)
       .map(p => ({ ...p, profit: p.revenue - p.cogs, margin: p.revenue > 0 ? (p.revenue - p.cogs) / p.revenue : 0 }))
 
+    // ── Inventory value (always current) ────────────────────────────
+    let inventoryValue = 0
+    let totalProcured  = 0
+    try {
+      let ivq = supabase.from('products_with_stock').select('remaining_stock, total_cost_with_handling, stock_quantity')
+      const ids = await getBrandIds(brand)
+      if (ids !== null) {
+        if (ids.length > 0) ivq = ivq.in('id', ids)
+        else ivq = ivq.in('id', [])
+      }
+      const { data: ivData } = await ivq
+      for (const p of (ivData ?? []) as any[]) {
+        inventoryValue += (p.total_cost_with_handling ?? 0) * (p.remaining_stock ?? 0)
+        totalProcured  += (p.total_cost_with_handling ?? 0) * (p.stock_quantity ?? 0)
+      }
+    } catch { /* ignore */ }
+
     return NextResponse.json({
       summary: {
-        revenue:        totalRevenue,
-        cogs:           totalCogs,
-        profit:         totalProfit,
-        margin:         totalRevenue > 0 ? totalProfit / totalRevenue : 0,
-        qty:            totalQty,
+        revenue:         summaryRevenue,
+        cogs:            summaryCogs,
+        profit:          summaryProfit,
+        margin:          summaryRevenue > 0 ? summaryProfit / summaryRevenue : 0,
+        qty:             summaryQty,
+        expenses:        totalExpenses,
+        net_profit:      summaryProfit - totalExpenses,
         inventory_value: inventoryValue,
         total_procured:  totalProcured,
       },
       by_month,
       top_products,
-      used_fallback: usedFallback,
+      used_baseline: usedBaseline,
     })
   } catch (err) {
     console.error('reports error', err)

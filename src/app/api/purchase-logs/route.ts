@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
   const from  = searchParams.get('from')
   const to    = searchParams.get('to')
 
-  let q = supabase.from('purchase_logs').select('*').order('date', { ascending: false })
+  let q = supabase.from('purchase_logs').select('*, products(ai_suggested_name, product_name)').order('date', { ascending: false })
   if (product_id) q = q.eq('product_id', product_id)
   if (brand && brand !== 'all') q = q.eq('brand', brand)
   if (from) q = q.gte('date', from)

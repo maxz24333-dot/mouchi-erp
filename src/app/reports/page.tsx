@@ -65,6 +65,9 @@ export default function ReportsPage() {
   const [recCost, setRecCost]       = useState('')
   const [recBuyer, setRecBuyer]     = useState('')
   const [recSupplier, setRecSupplier] = useState('')
+  const [recError, setRecError]     = useState('')
+  const [recSuccess, setRecSuccess] = useState('')
+  const [purchaseLogs, setPurchaseLogs] = useState<any[]>([])
   const [products, setProducts]     = useState<any[]>([])
   const [productSearch, setProductSearch] = useState('')
   const [savingRec, setSavingRec]   = useState(false)
@@ -96,8 +99,19 @@ export default function ReportsPage() {
     } catch {}
   }, [period, brand, from, to])
 
+  const fetchPurchaseLogs = useCallback(async () => {
+    const params = new URLSearchParams({ brand })
+    if (from) params.set('from', from)
+    if (to)   params.set('to', to)
+    try {
+      const res = await fetch(`/api/purchase-logs?${params}`)
+      const json = await res.json()
+      if (Array.isArray(json)) setPurchaseLogs(json)
+    } catch {}
+  }, [period, brand, from, to])
+
   useEffect(() => {
-    if (period !== 'custom') { fetchReport(); fetchExpenses() }
+    if (period !== 'custom') { fetchReport(); fetchExpenses(); fetchPurchaseLogs() }
   }, [period, brand])
 
   // Load products for manual record
@@ -127,12 +141,13 @@ export default function ReportsPage() {
 
   async function addRecord() {
     if (!productSearch.trim() || !recQty) return
-    setSavingRec(true)
+    setSavingRec(true); setRecError(''); setRecSuccess('')
     try {
       const pid = recProductId || null
       const nameNote = pid ? null : productSearch.trim()
+      let res: Response
       if (recType === 'purchase') {
-        await fetch('/api/purchase-logs', {
+        res = await fetch('/api/purchase-logs', {
           method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify({
             product_id: pid,
@@ -155,12 +170,20 @@ export default function ReportsPage() {
         }
         if (recBrand === 'mouchi') body.cost_per_unit = recCost ? parseFloat(recCost) : null
         if (recBrand === 'wholesale') body.buyer = recBuyer || null
-        await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
+        res = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
       }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        setRecError(err.error || `儲存失敗（HTTP ${res.status}）`)
+        return
+      }
+      setRecSuccess(`已新增 ${recType === 'purchase' ? '進貨' : '出貨'}記錄`)
       setRecProduct(''); setRecProductId(''); setRecQty('1'); setRecPrice(''); setRecCost(''); setRecBuyer(''); setRecSupplier('')
       setProductSearch('')
-      setShowRecForm(false)
-      fetchReport()
+      fetchReport(); fetchPurchaseLogs()
+      setTimeout(() => setRecSuccess(''), 3000)
+    } catch (e: any) {
+      setRecError('網路錯誤，請再試一次')
     } finally { setSavingRec(false) }
   }
 
@@ -393,6 +416,34 @@ export default function ReportsPage() {
             className="w-full py-2.5 bg-gray-800 text-white text-sm rounded-xl hover:bg-gray-700 disabled:opacity-40 font-medium">
             {savingRec ? '儲存中…' : `新增這筆${recType === 'sale' ? '出貨' : '進貨'}記錄`}
           </button>
+          {recError && <p className="text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2">{recError}</p>}
+          {recSuccess && <p className="text-xs text-green-600 bg-green-50 rounded-lg px-3 py-2">✓ {recSuccess}</p>}
+        </div>
+      )}
+
+      {/* 近期進貨記錄清單 */}
+      {purchaseLogs.length > 0 && (
+        <div className="border-t border-gray-100">
+          <p className="px-4 py-2.5 text-xs font-semibold text-gray-500">近期進貨記錄</p>
+          <div className="divide-y divide-gray-50 max-h-48 overflow-y-auto">
+            {purchaseLogs.slice(0, 20).map((r: any) => (
+              <div key={r.id} className="px-4 py-2 flex items-center justify-between">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-gray-700 truncate">
+                    {r.products?.ai_suggested_name || r.products?.product_name || r.note || '未知商品'}
+                  </p>
+                  <p className="text-[10px] text-gray-400">
+                    {r.date} · {r.quantity} 件{r.unit_cost ? ` · NT$${r.unit_cost}/件` : ''}{r.supplier ? ` · ${r.supplier}` : ''}
+                  </p>
+                </div>
+                {r.unit_cost && (
+                  <p className="text-xs font-semibold text-blue-600 ml-3">
+                    NT${Math.round(r.unit_cost * r.quantity).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

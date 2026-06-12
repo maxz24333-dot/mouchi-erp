@@ -321,8 +321,8 @@ export default function LogsPage() {
 }
 
 function SnapshotSection({ snapDate, setSnapDate, snapBrand, setSnapBrand, snapLoading, snapLoaded, snapData, onFetch, mobile }: {
-  snapDate: string; setSnapDate: (v:string) => void
-  snapBrand: string; setSnapBrand: (v:string) => void
+  snapDate: string; setSnapDate: (v: string) => void
+  snapBrand: BrandF; setSnapBrand: (v: BrandF) => void
   snapLoading: boolean; snapLoaded: boolean; snapData: any[]
   onFetch: () => void; mobile?: boolean
 }) {

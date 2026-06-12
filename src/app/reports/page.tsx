@@ -65,7 +65,10 @@ export default function ReportsPage() {
     try {
       const res = await fetch(`/api/reports?${params}`)
       const json = await res.json()
-      setData(json)
+      if (json && !json.error) setData(json)
+      else setData(null)
+    } catch {
+      setData(null)
     } finally { setLoading(false) }
   }, [period, brand, customFrom, customTo])
 
@@ -130,6 +133,14 @@ export default function ReportsPage() {
         <div className="py-16 text-center text-gray-400">無資料</div>
       ) : (
         <>
+          {/* Fallback notice */}
+          {data.used_fallback && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700">
+              <span className="font-semibold">目前顯示累計總計（歷史估算）</span>，無月份明細。<br />
+              <span className="text-xs text-amber-600">往後每次按「已售出」系統會自動記錄，報表月份明細就會開始累積。</span>
+            </div>
+          )}
+
           {/* Summary cards */}
           <div className="grid grid-cols-4 gap-4">
             <SumCard label="銷售總額" value={fmt(s.revenue)} sub={`${s.qty} 件出貨`} color="text-gray-800" />
@@ -261,6 +272,13 @@ export default function ReportsPage() {
         <div className="py-16 text-center text-gray-400 text-sm">載入中…</div>
       ) : !data ? null : (
         <div className="px-4 pt-3 space-y-4">
+          {/* Fallback notice mobile */}
+          {data.used_fallback && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-xs text-amber-700">
+              <span className="font-semibold">顯示累計總計（歷史估算）</span>，無月份明細。往後出貨後才會有時段資料。
+            </div>
+          )}
+
           {/* Summary 2x2 */}
           <div className="grid grid-cols-2 gap-2">
             <MobileCard label="銷售總額" value={fmt(s.revenue)} sub={`${s.qty} 件出貨`} />

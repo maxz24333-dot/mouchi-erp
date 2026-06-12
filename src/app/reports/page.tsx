@@ -55,6 +55,7 @@ export default function ReportsPage() {
 
   // Manual record state
   const [showRecForm, setShowRecForm] = useState(false)
+  const [recType, setRecType]       = useState<'sale' | 'purchase'>('sale')
   const [recDate, setRecDate]       = useState(today())
   const [recBrand, setRecBrand]     = useState<BrandFilter>('mouchi')
   const [recProduct, setRecProduct] = useState('')
@@ -63,6 +64,7 @@ export default function ReportsPage() {
   const [recPrice, setRecPrice]     = useState('')
   const [recCost, setRecCost]       = useState('')
   const [recBuyer, setRecBuyer]     = useState('')
+  const [recSupplier, setRecSupplier] = useState('')
   const [products, setProducts]     = useState<any[]>([])
   const [productSearch, setProductSearch] = useState('')
   const [savingRec, setSavingRec]   = useState(false)
@@ -127,18 +129,33 @@ export default function ReportsPage() {
     if (!recProductId || !recQty) return
     setSavingRec(true)
     try {
-      const endpoint = recBrand === 'wholesale' ? '/api/shipment-logs' : '/api/sales-logs'
-      const body: any = {
-        product_id: recProductId,
-        brand: recBrand,
-        quantity: parseInt(recQty),
-        unit_price: recPrice ? parseFloat(recPrice) : null,
-        created_at: recDate + 'T12:00:00Z',
+      if (recType === 'purchase') {
+        await fetch('/api/purchase-logs', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            product_id: recProductId,
+            brand: recBrand,
+            quantity: parseInt(recQty),
+            unit_cost: recCost ? parseFloat(recCost) : null,
+            supplier: recSupplier || null,
+            date: recDate,
+          }),
+        })
+      } else {
+        const endpoint = recBrand === 'wholesale' ? '/api/shipment-logs' : '/api/sales-logs'
+        const body: any = {
+          product_id: recProductId,
+          brand: recBrand,
+          quantity: parseInt(recQty),
+          unit_price: recPrice ? parseFloat(recPrice) : null,
+          created_at: recDate + 'T12:00:00Z',
+        }
+        if (recBrand === 'mouchi') body.cost_per_unit = recCost ? parseFloat(recCost) : null
+        if (recBrand === 'wholesale') body.buyer = recBuyer || null
+        await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
       }
-      if (recBrand === 'mouchi') body.cost_per_unit = recCost ? parseFloat(recCost) : null
-      if (recBrand === 'wholesale') body.buyer = recBuyer || null
-      await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
-      setRecProduct(''); setRecProductId(''); setRecQty('1'); setRecPrice(''); setRecCost(''); setRecBuyer('')
+      setRecProduct(''); setRecProductId(''); setRecQty('1'); setRecPrice(''); setRecCost(''); setRecBuyer(''); setRecSupplier('')
+      setProductSearch('')
       setShowRecForm(false)
       fetchReport()
     } finally { setSavingRec(false) }
@@ -261,8 +278,8 @@ export default function ReportsPage() {
     <div className="bg-white rounded-2xl border border-gray-100">
       <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-gray-700">補入歷史出貨記錄</h2>
-          <p className="text-xs text-gray-400 mt-0.5">輸入過去的出貨，讓月份明細更完整</p>
+          <h2 className="text-sm font-semibold text-gray-700">補入歷史進銷記錄</h2>
+          <p className="text-xs text-gray-400 mt-0.5">補入過去的進貨或出貨，讓月份明細更完整</p>
         </div>
         <button onClick={() => setShowRecForm(v=>!v)}
           className="text-xs px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">
@@ -271,9 +288,21 @@ export default function ReportsPage() {
       </div>
       {showRecForm && (
         <div className="px-4 py-4 space-y-3">
+          {/* Type tabs */}
+          <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+            <button onClick={() => setRecType('sale')}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${recType==='sale' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'}`}>
+              📤 出貨記錄
+            </button>
+            <button onClick={() => setRecType('purchase')}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${recType==='purchase' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'}`}>
+              📥 進貨記錄
+            </button>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-gray-500 mb-1 block">出貨日期</label>
+              <label className="text-xs text-gray-500 mb-1 block">{recType === 'sale' ? '出貨' : '進貨'}日期</label>
               <input type="date" value={recDate} onChange={e=>setRecDate(e.target.value)}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
             </div>
@@ -286,6 +315,7 @@ export default function ReportsPage() {
               </select>
             </div>
           </div>
+
           <div>
             <label className="text-xs text-gray-500 mb-1 block">商品（搜尋名稱或編號）</label>
             <input type="text" placeholder="輸入商品名稱搜尋…" value={productSearch}
@@ -310,30 +340,52 @@ export default function ReportsPage() {
             )}
             {recProductId && <p className="text-xs text-green-600 mt-1">✓ 已選：{recProduct}</p>}
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">數量</label>
-              <input type="number" min="1" value={recQty} onChange={e=>setRecQty(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+
+          {recType === 'sale' ? (
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">數量</label>
+                <input type="number" min="1" value={recQty} onChange={e=>setRecQty(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">售價 NT$</label>
+                <input type="number" placeholder="選填" value={recPrice} onChange={e=>setRecPrice(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">{recBrand === 'wholesale' ? '買家' : '成本 NT$'}</label>
+                {recBrand === 'wholesale'
+                  ? <input type="text" placeholder="選填" value={recBuyer} onChange={e=>setRecBuyer(e.target.value)}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                  : <input type="number" placeholder="選填" value={recCost} onChange={e=>setRecCost(e.target.value)}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                }
+              </div>
             </div>
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">售價 NT$</label>
-              <input type="number" placeholder="選填" value={recPrice} onChange={e=>setRecPrice(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+          ) : (
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">進貨數量</label>
+                <input type="number" min="1" value={recQty} onChange={e=>setRecQty(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">單件進貨成本 NT$</label>
+                <input type="number" placeholder="選填" value={recCost} onChange={e=>setRecCost(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">供應商（選填）</label>
+                <input type="text" placeholder="例：韓國廠商" value={recSupplier} onChange={e=>setRecSupplier(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              </div>
             </div>
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">{recBrand === 'wholesale' ? '買家' : '成本 NT$'}</label>
-              {recBrand === 'wholesale'
-                ? <input type="text" placeholder="選填" value={recBuyer} onChange={e=>setRecBuyer(e.target.value)}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-                : <input type="number" placeholder="選填" value={recCost} onChange={e=>setRecCost(e.target.value)}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-              }
-            </div>
-          </div>
+          )}
+
           <button onClick={addRecord} disabled={savingRec || !recProductId}
             className="w-full py-2.5 bg-gray-800 text-white text-sm rounded-xl hover:bg-gray-700 disabled:opacity-40 font-medium">
-            {savingRec ? '儲存中…' : '新增這筆記錄'}
+            {savingRec ? '儲存中…' : `新增這筆${recType === 'sale' ? '出貨' : '進貨'}記錄`}
           </button>
         </div>
       )}
@@ -370,8 +422,9 @@ export default function ReportsPage() {
             <SumCard label="毛利率" value={pct(s.margin)} color={s.margin>=0.3?'text-green-600':s.margin>=0.15?'text-amber-500':'text-red-500'} />
           </div>
 
-          {/* Row 2: expenses & net profit */}
-          <div className="grid grid-cols-3 gap-4">
+          {/* Row 2: procurement + expenses + net profit */}
+          <div className="grid grid-cols-4 gap-4">
+            <SumCard label="進貨總額（記錄）" value={fmt(s.purchased_amount??0)} sub={`${s.purchased_qty??0} 件入庫`} color="text-blue-600" />
             <SumCard label="宣傳/其他開銷" value={`-${fmt(s.expenses??0)}`} color="text-red-500" sub="已記錄費用" />
             <SumCard label="實際淨利（扣除開銷）" value={fmt(s.net_profit??s.profit)}
               color={(s.net_profit??s.profit)>=0?'text-green-600':'text-red-500'}
@@ -504,13 +557,14 @@ export default function ReportsPage() {
             <MobileCard label="毛利率" value={pct(s.margin)} green={s.margin>=0.3} red={s.margin<0.15&&s.revenue>0} />
           </div>
 
-          {/* Expenses + net profit */}
+          {/* Procurement + expenses + net profit */}
           <div className="grid grid-cols-2 gap-2">
+            <MobileCard label="進貨金額（記錄）" value={fmt(s.purchased_amount??0)} sub={`${s.purchased_qty??0} 件`} />
             <MobileCard label="宣傳開銷" value={`-${fmt(s.expenses??0)}`} red />
-            <MobileCard label="實際淨利" value={fmt(s.net_profit??s.profit)} green={(s.net_profit??s.profit)>=0} red={(s.net_profit??s.profit)<0} />
           </div>
-          <div className="grid grid-cols-1 gap-2">
-            <MobileCard label="在庫總值（未售成本）" value={fmt(s.inventory_value??0)} indigo />
+          <div className="grid grid-cols-2 gap-2">
+            <MobileCard label="實際淨利" value={fmt(s.net_profit??s.profit)} green={(s.net_profit??s.profit)>=0} red={(s.net_profit??s.profit)<0} />
+            <MobileCard label="在庫總值" value={fmt(s.inventory_value??0)} indigo />
           </div>
 
           {/* Expense section */}

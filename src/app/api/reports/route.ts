@@ -114,6 +114,21 @@ export async function GET(req: NextRequest) {
       totalExpenses = (expData ?? []).reduce((s: number, e: any) => s + (e.amount ?? 0), 0)
     } catch { /* expenses table may not exist */ }
 
+    // ── Purchase logs (same date range) ─────────────────────────────
+    let totalPurchased = 0
+    let purchaseQty    = 0
+    try {
+      let pq = supabase.from('purchase_logs').select('quantity, unit_cost, date')
+      if (brand !== 'all') pq = pq.eq('brand', brand)
+      if (from) pq = pq.gte('date', from)
+      if (to)   pq = pq.lte('date', to)
+      const { data: purData } = await pq
+      for (const p of (purData ?? []) as any[]) {
+        totalPurchased += (p.unit_cost ?? 0) * (p.quantity ?? 0)
+        purchaseQty    += p.quantity ?? 0
+      }
+    } catch { /* purchase_logs may not exist */ }
+
     // ── Monthly breakdown (from logs only) ───────────────────────────
     const monthMap: Record<string, { revenue: number; cogs: number; count: number; qty: number }> = {}
     for (const r of rows) {
@@ -168,15 +183,17 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       summary: {
-        revenue:         summaryRevenue,
-        cogs:            summaryCogs,
-        profit:          summaryProfit,
-        margin:          summaryRevenue > 0 ? summaryProfit / summaryRevenue : 0,
-        qty:             summaryQty,
-        expenses:        totalExpenses,
-        net_profit:      summaryProfit - totalExpenses,
-        inventory_value: inventoryValue,
-        total_procured:  totalProcured,
+        revenue:          summaryRevenue,
+        cogs:             summaryCogs,
+        profit:           summaryProfit,
+        margin:           summaryRevenue > 0 ? summaryProfit / summaryRevenue : 0,
+        qty:              summaryQty,
+        expenses:         totalExpenses,
+        net_profit:       summaryProfit - totalExpenses,
+        inventory_value:  inventoryValue,
+        total_procured:   totalProcured,
+        purchased_amount: totalPurchased,
+        purchased_qty:    purchaseQty,
       },
       by_month,
       top_products,

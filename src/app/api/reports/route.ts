@@ -91,6 +91,26 @@ export async function GET(req: NextRequest) {
       } catch { /* ignore */ }
     }
 
+    // ── Inventory value (always current, independent of period) ─────
+    let inventoryValue = 0
+    let totalProcured  = 0
+    try {
+      let ivq = supabase
+        .from('products_with_stock')
+        .select('remaining_stock, total_cost_with_handling, stock_quantity')
+      if (brand !== 'all') {
+        const { data: bids } = await supabase.from('products').select('id').eq('brand', brand)
+        const ids = (bids ?? []).map((p: any) => p.id)
+        if (ids.length > 0) ivq = ivq.in('id', ids)
+        else ivq = ivq.in('id', [])
+      }
+      const { data: ivData } = await ivq
+      for (const p of (ivData ?? []) as any[]) {
+        inventoryValue += (p.total_cost_with_handling ?? 0) * (p.remaining_stock ?? 0)
+        totalProcured  += (p.total_cost_with_handling ?? 0) * (p.stock_quantity ?? 0)
+      }
+    } catch { /* ignore */ }
+
     // ── Aggregate ────────────────────────────────────────────────────
     const totalRevenue = usedFallback ? fallbackSummary.revenue : rows.reduce((s, r) => s + r.revenue, 0)
     const totalCogs    = usedFallback ? fallbackSummary.cogs    : rows.reduce((s, r) => s + r.cogs, 0)
@@ -132,11 +152,13 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       summary: {
-        revenue: totalRevenue,
-        cogs:    totalCogs,
-        profit:  totalProfit,
-        margin:  totalRevenue > 0 ? totalProfit / totalRevenue : 0,
-        qty:     totalQty,
+        revenue:        totalRevenue,
+        cogs:           totalCogs,
+        profit:         totalProfit,
+        margin:         totalRevenue > 0 ? totalProfit / totalRevenue : 0,
+        qty:            totalQty,
+        inventory_value: inventoryValue,
+        total_procured:  totalProcured,
       },
       by_month,
       top_products,

@@ -141,12 +141,17 @@ export default function ReportsPage() {
             </div>
           )}
 
-          {/* Summary cards */}
+          {/* Summary cards — row 1: sales */}
           <div className="grid grid-cols-4 gap-4">
             <SumCard label="銷售總額" value={fmt(s.revenue)} sub={`${s.qty} 件出貨`} color="text-gray-800" />
-            <SumCard label="商品成本" value={fmt(s.cogs)} color="text-gray-600" />
+            <SumCard label="已售成本" value={fmt(s.cogs)} color="text-gray-600" />
             <SumCard label="毛利" value={fmt(s.profit)} color={s.profit >= 0 ? 'text-green-600' : 'text-red-500'} />
             <SumCard label="毛利率" value={pct(s.margin)} color={s.margin >= 0.3 ? 'text-green-600' : s.margin >= 0.15 ? 'text-amber-500' : 'text-red-500'} sub={s.revenue === 0 ? '無銷售記錄' : undefined} />
+          </div>
+          {/* Summary cards — row 2: inventory */}
+          <div className="grid grid-cols-2 gap-4">
+            <SumCard label="在庫總值（未售商品成本）" value={fmt(s.inventory_value ?? 0)} color="text-indigo-600" sub="目前庫存的進貨成本合計" />
+            <SumCard label="進貨總成本（已售＋在庫）" value={fmt(s.total_procured ?? 0)} color="text-gray-700" sub="所有進貨的總資金投入" />
           </div>
 
           {/* Monthly breakdown */}
@@ -279,12 +284,17 @@ export default function ReportsPage() {
             </div>
           )}
 
-          {/* Summary 2x2 */}
+          {/* Summary 2x2 — sales */}
           <div className="grid grid-cols-2 gap-2">
-            <MobileCard label="銷售總額" value={fmt(s.revenue)} sub={`${s.qty} 件出貨`} />
-            <MobileCard label="商品成本" value={fmt(s.cogs)} dim />
+            <MobileCard label="銷售總額" value={fmt(s.revenue)} sub={`${s.qty} 件`} />
+            <MobileCard label="已售成本" value={fmt(s.cogs)} dim />
             <MobileCard label="毛利" value={fmt(s.profit)} green={s.profit >= 0} red={s.profit < 0} />
             <MobileCard label="毛利率" value={pct(s.margin)} green={s.margin >= 0.3} red={s.margin < 0.15 && s.revenue > 0} />
+          </div>
+          {/* Summary 2x2 — inventory */}
+          <div className="grid grid-cols-2 gap-2">
+            <MobileCard label="在庫總值" value={fmt(s.inventory_value ?? 0)} indigo sub="未售成本" />
+            <MobileCard label="進貨總成本" value={fmt(s.total_procured ?? 0)} sub="已售＋在庫" />
           </div>
 
           {/* Monthly */}

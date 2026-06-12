@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import type { SourceRow, Settings } from '@/types'
+import { useBrand } from '@/lib/brand'
 import ProductCard from '@/components/ProductCard'
 import InventoryTable from '@/components/InventoryTable'
 
@@ -21,9 +22,12 @@ const DEFAULT_SETTINGS: Settings = {
   handling_fee_pct: 0.05,
   target_margin_pct: 0.4,
   exchange_rate_buffer: 1.05,
+  wholesale_target_margin_pct: 0.20,
+  wholesale_handling_fee_pct: 0.03,
 }
 
 export default function InventoryPage() {
+  const { brand, isWholesale } = useBrand()
   const [products, setProducts]         = useState<any[]>([])
   const [sources, setSources]           = useState<SourceRow[]>([])
   const [loading, setLoading]           = useState(true)
@@ -43,18 +47,18 @@ export default function InventoryPage() {
     fetchProducts()
     fetch('/api/settings').then(r => r.json()).then(d => { if (d) setSettings(prev => ({ ...prev, ...d })) }).catch(() => {})
     fetch('/api/sources').then(r => r.json()).then(d => { if (Array.isArray(d)) setSources(d) }).catch(() => {})
-  }, [])
+  }, [brand])
 
   async function fetchProducts() {
     setLoading(true)
     try {
-      const res = await fetch('/api/products')
+      const res = await fetch(`/api/products?brand=${brand}`)
       const data = await res.json()
       setProducts(Array.isArray(data) ? data : [])
     } finally { setLoading(false) }
   }
 
-  async function handleSold(id: string, qty: number) {
+  async function handleSold(id: string, qty: number, opts?: { buyer?: string; unitPrice?: number; variantId?: string }) {
     const product = products.find(p => p.id === id)
     if (!product) return
     const newSold = product.sold_quantity + qty
@@ -62,6 +66,31 @@ export default function InventoryPage() {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sold_quantity: newSold }),
     })
+    if (isWholesale) {
+      await fetch('/api/shipment-logs', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          product_id: id,
+          variant_id: opts?.variantId || null,
+          brand: 'wholesale',
+          buyer: opts?.buyer || null,
+          quantity: qty,
+          unit_price: opts?.unitPrice || null,
+        }),
+      }).catch(() => {})
+    } else {
+      await fetch('/api/sales-logs', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          product_id: id,
+          variant_id: opts?.variantId || null,
+          brand: 'mouchi',
+          quantity: qty,
+          unit_price: product.my_selling_price ?? null,
+          cost_per_unit: product.total_cost_with_handling ?? null,
+        }),
+      }).catch(() => {})
+    }
     setProducts(prev => prev.map(p =>
       p.id === id ? { ...p, sold_quantity: newSold, remaining_stock: p.stock_quantity - newSold } : p
     ))
@@ -80,10 +109,11 @@ export default function InventoryPage() {
       const src = sourcesMap[merged.source]
       const shippingPerKg = src?.shipping_per_kg ?? 280
       const taxPct        = src?.tax_pct ?? 0
+      const handlingFee   = isWholesale ? settings.wholesale_handling_fee_pct : settings.handling_fee_pct
       const twd_cost      = (merged.original_cost * (1 + taxPct) + merged.original_cost * merged.service_fee_pct) * merged.exchange_rate
       const shipping_fee  = (merged.weight_g / 1000) * shippingPerKg
       const total_cost    = twd_cost + shipping_fee + merged.packaging_fee
-      const total_cost_with_handling = total_cost * (1 + settings.handling_fee_pct)
+      const total_cost_with_handling = total_cost * (1 + handlingFee)
       updates = { ...updates, twd_cost, shipping_fee, total_cost, total_cost_with_handling }
     }
 
@@ -126,7 +156,7 @@ export default function InventoryPage() {
 
   const filtered = useMemo(() => products.filter(p => {
     if (sourceFilter !== 'all' && p.source !== sourceFilter) return false
-    if (strategyFilter !== 'all' && p.strategy_tag !== strategyFilter) return false
+    if (!isWholesale && strategyFilter !== 'all' && p.strategy_tag !== strategyFilter) return false
     if (stockFilter !== 'all' && p.stock_status !== stockFilter) return false
     if (search) {
       const q = search.toLowerCase()
@@ -135,7 +165,7 @@ export default function InventoryPage() {
       if (!name.includes(q) && !code.includes(q)) return false
     }
     return true
-  }), [products, sourceFilter, strategyFilter, stockFilter, search])
+  }), [products, sourceFilter, strategyFilter, stockFilter, search, isWholesale])
 
   const stats = useMemo(() => {
     const profitCount = products.filter(p => p.strategy_tag === 'profit').length
@@ -143,7 +173,7 @@ export default function InventoryPage() {
     const tagged      = profitCount + leadCount
     return {
       total:      products.length,
-      totalStock: products.reduce((s, p) => s + p.remaining_stock, 0),
+      totalStock: products.reduce((s, p) => s + (p.remaining_stock ?? 0), 0),
       lowStock:   products.filter(p => p.stock_status === 'low_stock').length,
       soldOut:    products.filter(p => p.stock_status === 'sold_out').length,
       profitCount, leadCount,
@@ -152,12 +182,27 @@ export default function InventoryPage() {
     }
   }, [products])
 
+  const fin = useMemo(() => {
+    const revenue       = products.reduce((s, p) => s + (p.my_selling_price ?? 0) * (p.sold_quantity ?? 0), 0)
+    const soldCost      = products.reduce((s, p) => s + (p.total_cost_with_handling ?? 0) * (p.sold_quantity ?? 0), 0)
+    const netProfit     = revenue - soldCost
+    const margin        = revenue > 0 ? netProfit / revenue * 100 : 0
+    const inventoryVal  = products.reduce((s, p) => s + (p.total_cost_with_handling ?? 0) * (p.remaining_stock ?? 0), 0)
+    return { revenue, netProfit, margin, inventoryVal }
+  }, [products])
+
+  const accentBg    = isWholesale ? 'bg-indigo-500' : 'bg-pink-500'
+  const accentHover = isWholesale ? 'hover:bg-indigo-600' : 'hover:bg-pink-600'
+  const accentFilter = isWholesale ? 'bg-indigo-500 text-white' : 'bg-pink-500 text-white'
+
   // ── Desktop layout ──────────────────────────────────────────────
   const desktopContent = (
     <div className="p-6 space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">庫存管理</h1>
+          <h1 className="text-xl font-bold text-gray-900">
+            {isWholesale ? '批發倉庫存' : '庫存管理'}
+          </h1>
           <p className="text-sm text-gray-500 mt-0.5">{stats.total} 款商品・{stats.totalStock} 件在庫</p>
         </div>
         <div className="flex gap-2">
@@ -165,21 +210,35 @@ export default function InventoryPage() {
             className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-emerald-700 bg-emerald-50 rounded-xl hover:bg-emerald-100 transition disabled:opacity-50">
             📊 {exporting ? '匯出中…' : '匯出 Excel'}
           </button>
-          <Link href="/" className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-pink-500 rounded-xl hover:bg-pink-600 transition">
-            + 新增選品
+          <Link href="/" className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white ${accentBg} rounded-xl ${accentHover} transition`}>
+            + 入庫
           </Link>
         </div>
       </div>
 
+      {/* 財務統計 */}
+      <div className="grid grid-cols-3 gap-4">
+        <FinCard label="累計銷售額" value={fin.revenue} color="text-gray-800" />
+        <FinCard label="累計淨利" value={fin.netProfit} color={fin.netProfit >= 0 ? 'text-green-600' : 'text-red-500'}
+          sub={fin.revenue > 0 ? `毛利率 ${fin.margin.toFixed(1)}%` : undefined} />
+        <FinCard label="在庫總值（成本）" value={fin.inventoryVal} color="text-indigo-600"
+          sub={`${stats.totalStock} 件在庫`} />
+      </div>
+
+      {/* 庫存概況 */}
       <div className="grid grid-cols-3 gap-4">
         <StatCard label="商品款數" value={String(stats.total)} sub={`在庫 ${stats.totalStock} 件`} />
         <StatCard label="低庫存警示" value={String(stats.lowStock)} warn={stats.lowStock > 0}
           sub={stats.soldOut > 0 ? `已售完 ${stats.soldOut} 款` : undefined}
           onClick={stats.lowStock > 0 ? () => setStockFilter('low_stock') : undefined} />
-        <StrategyCard profitCount={stats.profitCount} leadCount={stats.leadCount}
-          profitPct={stats.profitPct} leadPct={stats.leadPct}
-          onClickProfit={() => setStrategyFilter('profit')}
-          onClickLead={() => setStrategyFilter('lead')} />
+        {isWholesale ? (
+          <StatCard label="已售完" value={String(stats.soldOut)} warn={stats.soldOut > 0} />
+        ) : (
+          <StrategyCard profitCount={stats.profitCount} leadCount={stats.leadCount}
+            profitPct={stats.profitPct} leadPct={stats.leadPct}
+            onClickProfit={() => setStrategyFilter('profit')}
+            onClickLead={() => setStrategyFilter('lead')} />
+        )}
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 p-4 flex flex-wrap gap-3 items-center">
@@ -188,24 +247,26 @@ export default function InventoryPage() {
           className="flex-1 min-w-[180px] bg-gray-50 rounded-xl px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-pink-200" />
         <div className="flex gap-1.5 flex-wrap">
           <button onClick={() => setSourceFilter('all')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${sourceFilter === 'all' ? 'bg-pink-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${sourceFilter === 'all' ? accentFilter : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
             全部
           </button>
           {sources.map(s => (
             <button key={s.id} onClick={() => setSourceFilter(s.id)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${sourceFilter === s.id ? 'bg-pink-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${sourceFilter === s.id ? accentFilter : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
               {s.label}
             </button>
           ))}
         </div>
-        <div className="flex gap-1.5">
-          {STRATEGY_OPTS.map(o => (
-            <button key={o.v} onClick={() => setStrategyFilter(o.v as StrategyFilter)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${strategyFilter === o.v ? 'bg-pink-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-              {o.l}
-            </button>
-          ))}
-        </div>
+        {!isWholesale && (
+          <div className="flex gap-1.5">
+            {STRATEGY_OPTS.map(o => (
+              <button key={o.v} onClick={() => setStrategyFilter(o.v as StrategyFilter)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${strategyFilter === o.v ? accentFilter : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                {o.l}
+              </button>
+            ))}
+          </div>
+        )}
         {(stockFilter !== 'all' || sourceFilter !== 'all') && (
           <button onClick={() => { setStockFilter('all'); setSourceFilter('all') }}
             className="px-3 py-1.5 rounded-xl text-xs font-medium bg-gray-800 text-white hover:bg-gray-700">
@@ -218,7 +279,15 @@ export default function InventoryPage() {
         {loading ? (
           <div className="p-12 text-center text-gray-400">載入中…</div>
         ) : (
-          <InventoryTable products={filtered} sourcesMap={sourcesMap} settings={settings} onSold={handleSold} onSave={handleSaveProduct} onDelete={handleDelete} />
+          <InventoryTable
+            products={filtered}
+            sourcesMap={sourcesMap}
+            settings={settings}
+            isWholesale={isWholesale}
+            onSold={handleSold}
+            onSave={handleSaveProduct}
+            onDelete={handleDelete}
+          />
         )}
       </div>
     </div>
@@ -230,7 +299,9 @@ export default function InventoryPage() {
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-gray-100 px-4 py-3">
         <div className="flex items-center justify-between mb-2">
           <div>
-            <h1 className="text-base font-bold text-gray-800">庫存總覽</h1>
+            <h1 className="text-base font-bold text-gray-800">
+              {isWholesale ? '批發倉庫存' : '庫存總覽'}
+            </h1>
             <p className="text-xs text-gray-400">{stats.total} 款・{stats.totalStock} 件</p>
           </div>
           <div className="flex gap-2 items-center">
@@ -238,7 +309,9 @@ export default function InventoryPage() {
               className="text-xs text-emerald-600 font-medium bg-emerald-50 px-3 py-1.5 rounded-full disabled:opacity-50">
               {exporting ? '匯出中…' : '📊 Excel'}
             </button>
-            <Link href="/" className="text-xs text-pink-500 font-medium bg-pink-50 px-3 py-1.5 rounded-full">+ 入庫</Link>
+            <Link href="/" className={`text-xs font-medium px-3 py-1.5 rounded-full ${isWholesale ? 'text-indigo-500 bg-indigo-50' : 'text-pink-500 bg-pink-50'}`}>
+              + 入庫
+            </Link>
           </div>
         </div>
         <input type="search" value={search} onChange={e => setSearch(e.target.value)}
@@ -246,8 +319,22 @@ export default function InventoryPage() {
           className="w-full bg-gray-100 rounded-xl px-3 py-2 text-sm outline-none" />
       </header>
 
+      {/* 財務統計 — 手機版 */}
+      <div className="px-4 pt-3 grid grid-cols-3 gap-2">
+        <MobileFinCard label="累計銷售" value={fin.revenue} />
+        <MobileFinCard label="累計淨利" value={fin.netProfit} green={fin.netProfit >= 0} />
+        <MobileFinCard label="在庫總值" value={fin.inventoryVal} indigo />
+      </div>
+      {fin.revenue > 0 && (
+        <div className="px-4 pt-1">
+          <p className="text-[10px] text-gray-400 text-center">
+            毛利率 {fin.margin.toFixed(1)}%　·　在庫 {stats.totalStock} 件
+          </p>
+        </div>
+      )}
+
       {(stats.lowStock > 0 || stats.soldOut > 0) && (
-        <div className="flex gap-2 px-4 pt-3">
+        <div className="flex gap-2 px-4 pt-2">
           {stats.lowStock > 0 && (
             <button onClick={() => setStockFilter('low_stock')}
               className="flex-1 bg-amber-50 text-amber-600 text-xs font-medium py-2 rounded-xl">
@@ -266,24 +353,26 @@ export default function InventoryPage() {
       <div className="px-4 pt-3 space-y-2">
         <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
           <button onClick={() => setSourceFilter('all')}
-            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${sourceFilter === 'all' ? 'bg-pink-400 text-white' : 'bg-white text-gray-600 shadow-sm'}`}>
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${sourceFilter === 'all' ? (isWholesale ? 'bg-indigo-400 text-white' : 'bg-pink-400 text-white') : 'bg-white text-gray-600 shadow-sm'}`}>
             全部
           </button>
           {sources.map(s => (
             <button key={s.id} onClick={() => setSourceFilter(s.id)}
-              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${sourceFilter === s.id ? 'bg-pink-400 text-white' : 'bg-white text-gray-600 shadow-sm'}`}>
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${sourceFilter === s.id ? (isWholesale ? 'bg-indigo-400 text-white' : 'bg-pink-400 text-white') : 'bg-white text-gray-600 shadow-sm'}`}>
               {s.label}
             </button>
           ))}
         </div>
-        <div className="flex gap-1.5">
-          {STRATEGY_OPTS.map(o => (
-            <button key={o.v} onClick={() => setStrategyFilter(o.v as StrategyFilter)}
-              className={`flex-1 py-1.5 rounded-xl text-xs font-medium transition-all ${strategyFilter === o.v ? 'bg-pink-400 text-white' : 'bg-white text-gray-600 shadow-sm'}`}>
-              {o.l}
-            </button>
-          ))}
-        </div>
+        {!isWholesale && (
+          <div className="flex gap-1.5">
+            {STRATEGY_OPTS.map(o => (
+              <button key={o.v} onClick={() => setStrategyFilter(o.v as StrategyFilter)}
+                className={`flex-1 py-1.5 rounded-xl text-xs font-medium transition-all ${strategyFilter === o.v ? 'bg-pink-400 text-white' : 'bg-white text-gray-600 shadow-sm'}`}>
+                {o.l}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="px-4 pt-3 space-y-2">
@@ -296,7 +385,7 @@ export default function InventoryPage() {
             {!search && <Link href="/" className="mt-3 inline-block text-pink-500 text-sm font-medium">前往入庫 →</Link>}
           </div>
         ) : filtered.map(product => (
-          <ProductCard key={product.id} product={product} sourcesMap={sourcesMap} onSold={handleSold} onSave={handleSaveProduct} />
+          <ProductCard key={product.id} product={product} sourcesMap={sourcesMap} isWholesale={isWholesale} onSold={handleSold} onSave={handleSaveProduct} />
         ))}
       </div>
 
@@ -316,6 +405,32 @@ export default function InventoryPage() {
       <div className="hidden lg:block">{desktopContent}</div>
       <div className="lg:hidden">{mobileContent}</div>
     </>
+  )
+}
+
+function fmt(n: number) {
+  if (Math.abs(n) >= 10000) return `NT$${(n / 1000).toFixed(1)}k`
+  return `NT$${Math.round(n).toLocaleString()}`
+}
+
+function FinCard({ label, value, color, sub }: { label: string; value: number; color: string; sub?: string }) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 p-4">
+      <p className="text-xs text-gray-500 mb-1">{label}</p>
+      <p className={`text-xl font-bold ${color}`}>{fmt(value)}</p>
+      {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
+    </div>
+  )
+}
+
+function MobileFinCard({ label, value, green, indigo }: { label: string; value: number; green?: boolean; indigo?: boolean }) {
+  return (
+    <div className="bg-white rounded-xl shadow-sm p-2.5 text-center">
+      <p className="text-[10px] text-gray-400 mb-0.5">{label}</p>
+      <p className={`text-sm font-bold leading-tight ${green !== undefined ? (green ? 'text-green-600' : 'text-red-500') : indigo ? 'text-indigo-600' : 'text-gray-800'}`}>
+        {fmt(value)}
+      </p>
+    </div>
   )
 }
 

@@ -6,7 +6,7 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
 const CURRENCY_RATE: Record<string, number> = {
   '¥': 0.23, '￥': 0.23, 'JPY': 0.23,
   '฿': 1.19, 'THB': 1.19,
-  '₩': 0.024, 'KRW': 0.024,
+  '₩': 0.025, 'KRW': 0.025,
   'NT$': 1.0, 'NTD': 1.0, 'TWD': 1.0,
   '$': 1.0,
 }

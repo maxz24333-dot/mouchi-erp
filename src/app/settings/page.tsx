@@ -8,6 +8,8 @@ const DEFAULT_SETTINGS: Settings = {
   handling_fee_pct: 0.05,
   target_margin_pct: 0.4,
   exchange_rate_buffer: 1.05,
+  wholesale_target_margin_pct: 0.20,
+  wholesale_handling_fee_pct: 0.03,
 }
 
 const BLANK_SOURCE = {
@@ -251,9 +253,19 @@ export default function SettingsPage() {
 
         {/* ── 戰略判斷 ── */}
         <div className="bg-white rounded-2xl shadow-sm p-4">
-          <h2 className="text-sm font-semibold text-gray-700 mb-3">商品戰略判斷</h2>
+          <h2 className="text-sm font-semibold text-gray-700 mb-3">商品戰略判斷（MOUCHI零售）</h2>
           <p className="text-xs text-gray-400 mb-2">毛利率低於此值 × 0.7 → 引流品；高於此值 × 1.2 → 利潤品</p>
           <NumberInput label="目標毛利率" value={settings.target_margin_pct * 100} onChange={v => update('target_margin_pct', String(parseFloat(v) / 100))} unit="%" />
+        </div>
+
+        {/* ── 批發倉專用 ── */}
+        <div className="bg-white rounded-2xl shadow-sm p-4 border border-indigo-100">
+          <h2 className="text-sm font-semibold text-indigo-700 mb-1">批發倉設定</h2>
+          <p className="text-xs text-gray-400 mb-3">批發中盤商的毛利與手續費標準</p>
+          <div className="space-y-3">
+            <NumberInput label="目標毛利率" value={(settings.wholesale_target_margin_pct ?? 0.20) * 100} onChange={v => update('wholesale_target_margin_pct', String(parseFloat(v) / 100))} unit="%" />
+            <NumberInput label="手續費（人工成本）" value={(settings.wholesale_handling_fee_pct ?? 0.03) * 100} onChange={v => update('wholesale_handling_fee_pct', String(parseFloat(v) / 100))} unit="%" />
+          </div>
         </div>
 
         <button onClick={handleSaveSettings} disabled={saving}

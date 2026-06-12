@@ -21,14 +21,19 @@ export async function GET() {
 
   if (stale.length === 0) return NextResponse.json(sources)
 
-  // Batch-fetch rates for all unique stale currencies
+  // Batch-fetch rates for all unique stale currencies; return stale data if APIs are down
   const currencies = [...new Set(stale.map((s: any) => s.currency as string))]
-  const rates = await fetchBatchRatesToTWD(currencies)
+  let rates: Record<string, number> = {}
+  try {
+    rates = await fetchBatchRatesToTWD(currencies)
+  } catch {
+    return NextResponse.json(sources)
+  }
 
   const now = new Date().toISOString()
   const updated = sources.map((s: any) => ({ ...s }))
 
-  await Promise.all(
+  await Promise.allSettled(
     stale.map(async (s: any) => {
       const rate = rates[s.currency.toUpperCase()]
       if (!rate) return

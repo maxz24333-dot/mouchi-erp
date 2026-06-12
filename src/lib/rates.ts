@@ -1,9 +1,21 @@
 const BOT_URL = 'https://rate.bot.com.tw/xrt/flcsv/0/day'
 
+// Fixed rates that bypass live API fetching (1 unit of currency = X TWD)
+const FIXED_RATES: Record<string, number> = {
+  KRW: 1 / 40, // 40 KRW = 1 TWD
+}
+
+function withTimeout(promise: Promise<Response>, ms: number): Promise<Response> {
+  return Promise.race([
+    promise,
+    new Promise<Response>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ])
+}
+
 /** Fetch all available rates from Taiwan BOT (cash sell). Returns { JPY: 0.237, THB: 0.91, KRW: 0.023, ... } */
 async function fetchBOTRates(): Promise<Record<string, number>> {
   try {
-    const res = await fetch(BOT_URL, { cache: 'no-store' })
+    const res = await withTimeout(fetch(BOT_URL, { cache: 'no-store' }), 5000)
     if (!res.ok) return {}
     const text = await res.text()
     const rates: Record<string, number> = {}
@@ -25,10 +37,10 @@ async function fetchFawazRate(currency: string): Promise<number | null> {
   const lower = currency.toLowerCase()
   if (lower === 'twd' || lower === 'ntd') return 1
   try {
-    const res = await fetch(
+    const res = await withTimeout(fetch(
       `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/${lower}.json`,
       { cache: 'no-store' }
-    )
+    ), 5000)
     if (!res.ok) return null
     const data = await res.json()
     const rate = data[lower]?.twd
@@ -55,9 +67,10 @@ export async function fetchBatchRatesToTWD(currencies: string[]): Promise<Record
 
   for (const c of unique) {
     if (c === 'TWD' || c === 'NTD') { result[c] = 1; continue }
-    if (botRates[c])                { result[c] = botRates[c]; continue }
+    if (FIXED_RATES[c] !== undefined) { result[c] = FIXED_RATES[c]; continue }
+    if (botRates[c])                  { result[c] = botRates[c]; continue }
     const f = fawazResults.find(x => x.c === c)
-    if (f?.r)                       { result[c] = f.r }
+    if (f?.r)                         { result[c] = f.r }
   }
   return result
 }

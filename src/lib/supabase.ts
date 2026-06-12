@@ -8,11 +8,12 @@ let _client: AnySupabase | null = null
 export function getSupabaseClient(): AnySupabase {
   if (_client) return _client
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  // Server-side: prefer service_role key (bypasses RLS); fallback to anon for local dev
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   if (!url || !key || url === 'your_supabase_url_here') {
-    throw new Error('Supabase not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local')
+    throw new Error('Supabase not configured. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local')
   }
-  _client = createClient(url, key)
+  _client = createClient(url, key, { auth: { persistSession: false } })
   return _client
 }
 

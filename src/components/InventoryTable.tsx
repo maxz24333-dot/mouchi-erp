@@ -12,7 +12,8 @@ interface Props {
   products: any[]
   sourcesMap: Record<string, SourceRow>
   settings: Settings
-  onSold: (id: string, qty: number) => void
+  isWholesale?: boolean
+  onSold: (id: string, qty: number, opts?: { buyer?: string; unitPrice?: number; variantId?: string }) => void
   onSave: (id: string, edits: Record<string, any>) => Promise<void>
   onDelete: (id: string) => Promise<void>
 }
@@ -41,7 +42,7 @@ function isDirty(form: Record<string, string>, p: any) {
   return Object.keys(orig).some(k => form[k] !== orig[k])
 }
 
-export default function InventoryTable({ products, sourcesMap, settings, onSold, onSave, onDelete }: Props) {
+export default function InventoryTable({ products, sourcesMap, settings, isWholesale, onSold, onSave, onDelete }: Props) {
   if (products.length === 0) {
     return (
       <div className="text-center py-20 text-gray-400">
@@ -61,17 +62,17 @@ export default function InventoryTable({ products, sourcesMap, settings, onSold,
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-24">來源</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-32 text-right">原始成本</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-28 text-right">總成本(含手續費)</th>
-            <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-28 text-right">賣價</th>
+            <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-28 text-right">批發/賣價</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-28 text-right">毛利</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-32 text-center">庫存</th>
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-40">備註</th>
-            <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-24 text-center">戰略</th>
+            {!isWholesale && <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-24 text-center">戰略</th>}
             <th className="px-3 py-3 font-semibold text-gray-500 text-xs uppercase tracking-wide w-36 text-center">操作</th>
           </tr>
         </thead>
         <tbody>
           {products.map(p => (
-            <ProductRow key={p.id} product={p} sourcesMap={sourcesMap} settings={settings} onSold={onSold} onSave={onSave} onDelete={onDelete} />
+            <ProductRow key={p.id} product={p} sourcesMap={sourcesMap} settings={settings} isWholesale={isWholesale} onSold={onSold} onSave={onSave} onDelete={onDelete} />
           ))}
         </tbody>
       </table>
@@ -79,11 +80,12 @@ export default function InventoryTable({ products, sourcesMap, settings, onSold,
   )
 }
 
-function ProductRow({ product: p, sourcesMap, settings, onSold, onSave, onDelete }: {
+function ProductRow({ product: p, sourcesMap, settings, isWholesale, onSold, onSave, onDelete }: {
   product: any
   sourcesMap: Record<string, SourceRow>
   settings: Settings
-  onSold: (id: string, qty: number) => void
+  isWholesale?: boolean
+  onSold: (id: string, qty: number, opts?: { buyer?: string; unitPrice?: number; variantId?: string }) => void
   onSave: (id: string, edits: Record<string, any>) => Promise<void>
   onDelete: (id: string) => Promise<void>
 }) {
@@ -100,8 +102,11 @@ function ProductRow({ product: p, sourcesMap, settings, onSold, onSave, onDelete
   const [newLabel, setNewLabel] = useState('')
   const [newStock, setNewStock] = useState('1')
   const [addingV, setAddingV]   = useState(false)
+  const [variantError, setVariantError] = useState<string | null>(null)
   const [soldVariantId, setSoldVariantId] = useState<string>('')
   const [soldVariantQty, setSoldVariantQty] = useState(1)
+  const [wholeBuyer, setWholeBuyer] = useState('')
+  const [wholePrice, setWholePrice] = useState('')
 
   const hasVariants = variants.length > 0
 
@@ -111,15 +116,22 @@ function ProductRow({ product: p, sourcesMap, settings, onSold, onSave, onDelete
   const srcLabel = srcInfo?.label ?? p.source ?? '—'
   const strategy = form.strategy_tag ? STRATEGY_CONFIG[form.strategy_tag] : null
 
+  // Use fresh rate from sourcesMap (auto-refreshed), apply buffer except for fixed-rate currencies (KRW)
+  const rawSourceRate = srcInfo?.exchange_rate ?? 0
+  const isFixedRate   = srcInfo?.currency === 'KRW'
+  const effectiveRate = rawSourceRate > 0
+    ? (isFixedRate ? rawSourceRate : rawSourceRate * settings.exchange_rate_buffer)
+    : 0
+
   // live cost computation — recalculates whenever form changes
-  const liveCost = (parseFloat(form.original_cost) > 0 && p.exchange_rate)
+  const liveCost = (parseFloat(form.original_cost) > 0 && effectiveRate > 0)
     ? calcCost({
         originalCost:   parseFloat(form.original_cost) || 0,
         weightG:        parseFloat(form.weight_g) || 0,
         packagingFee:   parseFloat(form.packaging_fee) || 0,
         serviceFeePct:  (parseFloat(form.service_fee_pct) || 0) / 100,
         taxPct:         srcInfo?.tax_pct ?? 0,
-        exchangeRate:   p.exchange_rate,
+        exchangeRate:   effectiveRate,
         handlingFeePct: settings.handling_fee_pct,
       }, srcInfo?.shipping_per_kg ?? 280)
     : null
@@ -178,22 +190,29 @@ function ProductRow({ product: p, sourcesMap, settings, onSold, onSave, onDelete
   async function handleAddVariant() {
     if (!newLabel.trim()) return
     setAddingV(true)
-    const res = await fetch(`/api/products/${p.id}/variants`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ label: newLabel.trim(), stock_quantity: parseInt(newStock) || 0 }),
-    })
-    if (res.ok) {
-      const v = await res.json()
-      setVariants(prev => [...prev, v])
-      setNewLabel(''); setNewStock('1')
-      // sync form totals
-      const newVariants = [...variants, v]
-      setForm(prev => ({
-        ...prev,
-        stock_quantity: String(newVariants.reduce((s, vv) => s + vv.stock_quantity, 0)),
-        sold_quantity:  String(newVariants.reduce((s, vv) => s + vv.sold_quantity, 0)),
-      }))
+    setVariantError(null)
+    try {
+      const res = await fetch(`/api/products/${p.id}/variants`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: newLabel.trim(), stock_quantity: parseInt(newStock) || 0 }),
+      })
+      if (res.ok) {
+        const v = await res.json()
+        setVariants(prev => [...prev, v])
+        setNewLabel(''); setNewStock('1')
+        const newVariants = [...variants, v]
+        setForm(prev => ({
+          ...prev,
+          stock_quantity: String(newVariants.reduce((s, vv) => s + vv.stock_quantity, 0)),
+          sold_quantity:  String(newVariants.reduce((s, vv) => s + vv.sold_quantity, 0)),
+        }))
+      } else {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+        setVariantError(err.error ?? '新增失敗')
+      }
+    } catch (e) {
+      setVariantError(String(e))
     }
     setAddingV(false)
   }
@@ -241,8 +260,9 @@ function ProductRow({ product: p, sourcesMap, settings, onSold, onSave, onDelete
       body: JSON.stringify({ sold_quantity: newSold }),
     })
     if (res.ok) {
+      onSold(p.id, soldVariantQty, isWholesale ? { buyer: wholeBuyer, unitPrice: parseFloat(wholePrice) || undefined, variantId: soldVariantId } : { variantId: soldVariantId })
       setVariants(prev => prev.map(vv => vv.id === soldVariantId ? { ...vv, sold_quantity: newSold } : vv))
-      setSoldOpen(false); setSoldVariantId(''); setSoldVariantQty(1)
+      setSoldOpen(false); setSoldVariantId(''); setSoldVariantQty(1); setWholeBuyer(''); setWholePrice('')
     }
   }
 
@@ -361,31 +381,41 @@ function ProductRow({ product: p, sourcesMap, settings, onSold, onSave, onDelete
         </td>
 
         {/* 戰略 */}
-        <td className="px-3 py-2 text-center">
-          <select
-            value={form.strategy_tag}
-            onChange={e => set('strategy_tag', e.target.value)}
-            className={`text-xs px-2 py-0.5 rounded-full font-medium border-0 outline-none cursor-pointer ${strategy ? strategy.cls : 'bg-gray-100 text-gray-400'}`}
-          >
-            <option value="">— 未設</option>
-            <option value="profit">💰 利潤</option>
-            <option value="lead">📣 引流</option>
-            <option value="skip">⛔ 放棄</option>
-          </select>
-        </td>
+        {!isWholesale && (
+          <td className="px-3 py-2 text-center">
+            <select
+              value={form.strategy_tag}
+              onChange={e => set('strategy_tag', e.target.value)}
+              className={`text-xs px-2 py-0.5 rounded-full font-medium border-0 outline-none cursor-pointer ${strategy ? strategy.cls : 'bg-gray-100 text-gray-400'}`}
+            >
+              <option value="">— 未設</option>
+              <option value="profit">💰 利潤</option>
+              <option value="lead">📣 引流</option>
+              <option value="skip">⛔ 放棄</option>
+            </select>
+          </td>
+        )}
 
         {/* 操作 */}
         <td className="px-3 py-2 text-center">
           <div className="flex items-center justify-center gap-1 flex-wrap">
             {/* 出貨 — 無規格版 */}
             {!hasVariants && (soldOpen ? (
-              <>
-                <button onClick={() => setSoldQty(v => Math.max(1, v - 1))} className="w-5 h-5 rounded bg-gray-100 text-xs hover:bg-gray-200">−</button>
-                <span className="text-xs font-medium w-4 text-center">{soldQty}</span>
-                <button onClick={() => setSoldQty(v => Math.min(p.remaining_stock, v + 1))} className="w-5 h-5 rounded bg-gray-100 text-xs hover:bg-gray-200">+</button>
-                <button onClick={() => { onSold(p.id, soldQty); setSoldOpen(false) }} className="text-xs text-white bg-pink-500 px-1.5 py-0.5 rounded">✓</button>
-                <button onClick={() => setSoldOpen(false)} className="text-xs text-gray-400">✕</button>
-              </>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setSoldQty(v => Math.max(1, v - 1))} className="w-5 h-5 rounded bg-gray-100 text-xs hover:bg-gray-200">−</button>
+                  <span className="text-xs font-medium w-4 text-center">{soldQty}</span>
+                  <button onClick={() => setSoldQty(v => Math.min(p.remaining_stock, v + 1))} className="w-5 h-5 rounded bg-gray-100 text-xs hover:bg-gray-200">+</button>
+                  <button onClick={() => { onSold(p.id, soldQty, isWholesale ? { buyer: wholeBuyer, unitPrice: parseFloat(wholePrice) || undefined } : undefined); setSoldOpen(false); setWholeBuyer(''); setWholePrice('') }} className="text-xs text-white bg-pink-500 px-1.5 py-0.5 rounded">✓</button>
+                  <button onClick={() => setSoldOpen(false)} className="text-xs text-gray-400">✕</button>
+                </div>
+                {isWholesale && (
+                  <div className="flex items-center gap-1">
+                    <input value={wholeBuyer} onChange={e => setWholeBuyer(e.target.value)} placeholder="買家" className="text-xs border border-gray-200 rounded px-1.5 py-0.5 w-20 outline-none focus:border-indigo-300" />
+                    <input type="number" value={wholePrice} onChange={e => setWholePrice(e.target.value)} placeholder="批發價" className="text-xs border border-gray-200 rounded px-1.5 py-0.5 w-20 outline-none focus:border-indigo-300" />
+                  </div>
+                )}
+              </div>
             ) : (
               <button onClick={() => { setSoldOpen(true); setSoldQty(1) }}
                 disabled={totalRemaining === 0}
@@ -418,24 +448,32 @@ function ProductRow({ product: p, sourcesMap, settings, onSold, onSave, onDelete
 
               {/* 出貨（規格版）— 選規格再出貨 */}
               {hasVariants && (
-                <div className="flex items-center gap-2 mb-3 pb-3 border-b border-purple-100">
-                  <span className="text-xs text-gray-500">出貨：</span>
-                  <select value={soldVariantId} onChange={e => setSoldVariantId(e.target.value)}
-                    className="text-xs border border-gray-200 rounded-lg px-2 py-1 outline-none focus:border-purple-300 bg-white">
-                    <option value="">選擇規格</option>
-                    {variants.map(v => (
-                      <option key={v.id} value={v.id} disabled={v.stock_quantity - v.sold_quantity <= 0}>
-                        {v.label}（剩 {v.stock_quantity - v.sold_quantity} 件）
-                      </option>
-                    ))}
-                  </select>
-                  <button onClick={() => setSoldVariantQty(v => Math.max(1, v - 1))} className="w-6 h-6 rounded bg-gray-100 text-xs hover:bg-gray-200">−</button>
-                  <span className="text-xs font-medium w-4 text-center">{soldVariantQty}</span>
-                  <button onClick={() => setSoldVariantQty(v => v + 1)} className="w-6 h-6 rounded bg-gray-100 text-xs hover:bg-gray-200">+</button>
-                  <button onClick={handleVariantSell} disabled={!soldVariantId}
-                    className="text-xs text-white bg-pink-500 px-3 py-1 rounded-lg disabled:opacity-40">
-                    確認出貨
-                  </button>
+                <div className="mb-3 pb-3 border-b border-purple-100 space-y-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-gray-500">出貨：</span>
+                    <select value={soldVariantId} onChange={e => setSoldVariantId(e.target.value)}
+                      className="text-xs border border-gray-200 rounded-lg px-2 py-1 outline-none focus:border-purple-300 bg-white">
+                      <option value="">選擇規格</option>
+                      {variants.map(v => (
+                        <option key={v.id} value={v.id} disabled={v.stock_quantity - v.sold_quantity <= 0}>
+                          {v.label}（剩 {v.stock_quantity - v.sold_quantity} 件）
+                        </option>
+                      ))}
+                    </select>
+                    <button onClick={() => setSoldVariantQty(v => Math.max(1, v - 1))} className="w-6 h-6 rounded bg-gray-100 text-xs hover:bg-gray-200">−</button>
+                    <span className="text-xs font-medium w-4 text-center">{soldVariantQty}</span>
+                    <button onClick={() => setSoldVariantQty(v => v + 1)} className="w-6 h-6 rounded bg-gray-100 text-xs hover:bg-gray-200">+</button>
+                    <button onClick={handleVariantSell} disabled={!soldVariantId}
+                      className="text-xs text-white bg-pink-500 px-3 py-1 rounded-lg disabled:opacity-40">
+                      確認出貨
+                    </button>
+                  </div>
+                  {isWholesale && (
+                    <div className="flex items-center gap-2">
+                      <input value={wholeBuyer} onChange={e => setWholeBuyer(e.target.value)} placeholder="買家名稱" className="text-xs border border-gray-200 rounded-lg px-2 py-1 outline-none focus:border-indigo-300 bg-white w-28" />
+                      <input type="number" value={wholePrice} onChange={e => setWholePrice(e.target.value)} placeholder="批發單價 NT$" className="text-xs border border-gray-200 rounded-lg px-2 py-1 outline-none focus:border-indigo-300 bg-white w-28" />
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -469,8 +507,8 @@ function ProductRow({ product: p, sourcesMap, settings, onSold, onSave, onDelete
               </div>
 
               {/* 新增規格 */}
-              <div className="flex items-center gap-2 pt-1">
-                <input value={newLabel} onChange={e => setNewLabel(e.target.value)}
+              <div className="flex items-center gap-2 pt-1 flex-wrap">
+                <input value={newLabel} onChange={e => { setNewLabel(e.target.value); setVariantError(null) }}
                   placeholder="規格名稱（如 S / 紅色）"
                   className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-purple-300 bg-white w-40" />
                 <input type="number" value={newStock} onChange={e => setNewStock(e.target.value)}
@@ -480,6 +518,9 @@ function ProductRow({ product: p, sourcesMap, settings, onSold, onSave, onDelete
                   className="text-xs bg-purple-500 text-white px-3 py-1.5 rounded-lg disabled:opacity-40">
                   {addingV ? '新增中…' : '＋ 新增規格'}
                 </button>
+                {variantError && (
+                  <span className="text-xs text-red-500 font-medium">{variantError}</span>
+                )}
               </div>
             </div>
           </td>

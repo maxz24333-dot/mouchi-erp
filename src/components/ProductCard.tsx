@@ -15,7 +15,8 @@ const STOCK_CONFIG = {
 interface Props {
   product: any
   sourcesMap: Record<string, SourceRow>
-  onSold: (id: string, qty: number) => void
+  isWholesale?: boolean
+  onSold: (id: string, qty: number, opts?: { buyer?: string; unitPrice?: number; variantId?: string }) => void
   onSave: (id: string, edits: Record<string, any>) => Promise<void>
 }
 
@@ -43,12 +44,14 @@ function isDirty(form: Record<string, string>, product: any) {
   return Object.keys(orig).some(k => form[k] !== orig[k])
 }
 
-export default function ProductCard({ product, sourcesMap, onSold, onSave }: Props) {
+export default function ProductCard({ product, sourcesMap, isWholesale, onSold, onSave }: Props) {
   const [form, setForm]         = useState<Record<string, string>>(() => initForm(product))
   const [saving, setSaving]     = useState(false)
   const [soldQty, setSoldQty]   = useState(1)
   const [adOpen, setAdOpen]     = useState(false)
   const [soldOpen, setSoldOpen] = useState(false)
+  const [wholeBuyer, setWholeBuyer] = useState('')
+  const [wholePrice, setWholePrice] = useState('')
 
   const dirty    = isDirty(form, product)
   const name     = form.ai_suggested_name || form.product_name || '未命名商品'
@@ -222,16 +225,24 @@ export default function ProductCard({ product, sourcesMap, onSold, onSave }: Pro
         {/* ── 出貨 + 儲存 ── */}
         <div className="flex gap-2 pt-1">
           {soldOpen ? (
-            <div className="flex items-center gap-1.5 flex-1 bg-gray-50 rounded-xl px-2 py-1.5">
-              <button type="button" onClick={() => setSoldQty(v => Math.max(1, v - 1))} className="text-gray-500 text-base w-6 text-center">−</button>
-              <span className="text-sm font-semibold w-5 text-center">{soldQty}</span>
-              <button type="button" onClick={() => setSoldQty(v => Math.min(product.remaining_stock, v + 1))} className="text-gray-500 text-base w-6 text-center">+</button>
-              <button type="button"
-                onClick={() => { onSold(product.id, soldQty); setSoldQty(1); setSoldOpen(false) }}
-                className="flex-1 py-1 bg-pink-500 text-white text-xs rounded-lg font-medium">
-                出貨 {soldQty} 件
-              </button>
-              <button type="button" onClick={() => setSoldOpen(false)} className="text-gray-400 text-xs px-1">✕</button>
+            <div className="flex flex-col gap-1.5 flex-1 bg-gray-50 rounded-xl px-2 py-1.5">
+              <div className="flex items-center gap-1.5">
+                <button type="button" onClick={() => setSoldQty(v => Math.max(1, v - 1))} className="text-gray-500 text-base w-6 text-center">−</button>
+                <span className="text-sm font-semibold w-5 text-center">{soldQty}</span>
+                <button type="button" onClick={() => setSoldQty(v => Math.min(product.remaining_stock, v + 1))} className="text-gray-500 text-base w-6 text-center">+</button>
+                <button type="button"
+                  onClick={() => { onSold(product.id, soldQty, isWholesale ? { buyer: wholeBuyer, unitPrice: parseFloat(wholePrice) || undefined } : undefined); setSoldQty(1); setSoldOpen(false); setWholeBuyer(''); setWholePrice('') }}
+                  className="flex-1 py-1 bg-pink-500 text-white text-xs rounded-lg font-medium">
+                  出貨 {soldQty} 件
+                </button>
+                <button type="button" onClick={() => setSoldOpen(false)} className="text-gray-400 text-xs px-1">✕</button>
+              </div>
+              {isWholesale && (
+                <div className="flex gap-1.5">
+                  <input value={wholeBuyer} onChange={e => setWholeBuyer(e.target.value)} placeholder="買家名稱" className="flex-1 text-xs border border-gray-200 rounded-lg px-2 py-1 outline-none focus:border-indigo-300 bg-white" />
+                  <input type="number" value={wholePrice} onChange={e => setWholePrice(e.target.value)} placeholder="批發單價" className="w-24 text-xs border border-gray-200 rounded-lg px-2 py-1 outline-none focus:border-indigo-300 bg-white" />
+                </div>
+              )}
             </div>
           ) : (
             <button type="button"

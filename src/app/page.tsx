@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import type { SourceRow, Settings } from '@/types'
 import { calcCost, suggestStrategy } from '@/lib/cost'
+import { useBrand } from '@/lib/brand'
 import ImageUploader from '@/components/ImageUploader'
 import SourceSelector from '@/components/SourceSelector'
 import CostResultCard from '@/components/CostResultCard'
@@ -14,9 +15,13 @@ const DEFAULT_SETTINGS: Settings = {
   handling_fee_pct: 0.05,
   target_margin_pct: 0.4,
   exchange_rate_buffer: 1.05,
+  wholesale_target_margin_pct: 0.20,
+  wholesale_handling_fee_pct: 0.03,
 }
 
 export default function EntryPage() {
+  const { brand, isWholesale } = useBrand()
+
   // --- image ---
   const [imageFile, setImageFile]   = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -46,7 +51,11 @@ export default function EntryPage() {
   const [quantity, setQuantity] = useState(0)
   const [notes, setNotes]       = useState('')
 
-  // --- AI results ---
+  // --- variants ---
+  const [variantRows, setVariantRows] = useState([{ label: '', qty: '1' }, { label: '', qty: '1' }])
+  const hasVariants = variantRows.some(r => r.label.trim() !== '')
+
+  // --- AI results (retail only) ---
   const [aiLoading, setAiLoading] = useState(false)
   const [aiName, setAiName]       = useState<string | null>(null)
   const [marketLow, setMarketLow]     = useState<number | null>(null)
@@ -69,7 +78,7 @@ export default function EntryPage() {
     total_stock: number; low_stock_count: number
   } | null>(null)
 
-  // --- copy ---
+  // --- copy (retail only) ---
   const [copyOpen, setCopyOpen]         = useState(false)
   const [supplierCopy, setSupplierCopy] = useState('')
   const [adCopy, setAdCopy]             = useState('')
@@ -78,6 +87,7 @@ export default function EntryPage() {
   // --- submit ---
   const [submitting, setSubmitting] = useState(false)
   const [submitDone, setSubmitDone] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/sources').then(r => r.json()).then(d => {
@@ -89,10 +99,10 @@ export default function EntryPage() {
     fetch('/api/settings').then(r => r.json()).then(d => {
       if (d) setSettings(prev => ({ ...prev, ...d }))
     }).catch(() => {})
-    fetch('/api/dashboard').then(r => r.json()).then(d => {
+    fetch(`/api/dashboard?brand=${brand}`).then(r => r.json()).then(d => {
       if (!d.error) setDashboard(d)
     }).catch(() => {})
-  }, [])
+  }, [brand])
 
   useEffect(() => {
     if (aiName && !sellingName) setSellingName(aiName)
@@ -102,10 +112,16 @@ export default function EntryPage() {
 
   // --- derived ---
   const rawRate      = selectedSource?.exchange_rate ?? 0
-  const exchangeRate = rawRate * settings.exchange_rate_buffer
+  const isFixedRate  = selectedSource?.currency === 'KRW'
+  const exchangeRate = rawRate > 0
+    ? (isFixedRate ? rawRate : rawRate * settings.exchange_rate_buffer)
+    : 0
   const shippingPerKg = parseFloat(shippingRateInput) || selectedSource?.shipping_per_kg || 280
   const weightNum    = parseFloat(weightG) || 0
   const calcShipping = (weightNum / 1000) * shippingPerKg
+
+  const activeHandlingFee = isWholesale ? settings.wholesale_handling_fee_pct : settings.handling_fee_pct
+  const activeTargetMargin = isWholesale ? settings.wholesale_target_margin_pct : settings.target_margin_pct
 
   const cost = (originalCost && exchangeRate && selectedSource) ? calcCost(
     {
@@ -117,7 +133,7 @@ export default function EntryPage() {
         : 0,
       taxPct:         selectedSource.tax_pct,
       exchangeRate,
-      handlingFeePct: settings.handling_fee_pct,
+      handlingFeePct: activeHandlingFee,
     },
     shippingPerKg
   ) : null
@@ -125,21 +141,21 @@ export default function EntryPage() {
   const supplierPriceTWD = (parseFloat(supplierPriceLocal) || 0) * exchangeRate
   const sellingPriceNum  = parseFloat(mySellingPrice) || 0
   const strategyTag      = cost && sellingPriceNum > 0
-    ? suggestStrategy(cost.totalCostWithHandling, sellingPriceNum, marketAvg, settings.target_margin_pct)
+    ? suggestStrategy(cost.totalCostWithHandling, sellingPriceNum, marketAvg, activeTargetMargin)
     : null
   const currLabel = selectedSource?.currency ?? '—'
 
   useEffect(() => {
     if (autoFilledPrice.current) return
     if (!marketAvg || !cost || mySellingPrice) return
-    const marginBased = cost.totalCostWithHandling / (1 - settings.target_margin_pct)
+    const marginBased = cost.totalCostWithHandling / (1 - activeTargetMargin)
     const marketBased = marketAvg * marketMultiplier
     const suggested = Math.ceil(Math.max(marketBased, marginBased) / 50) * 50
     if (suggested > 0) { setMySellingPrice(String(suggested)); autoFilledPrice.current = true }
   }, [marketAvg, cost, marketMultiplier])
 
   const runAI = useCallback(async (file: File) => {
-    if (!selectedSource) return
+    if (!selectedSource || isWholesale) return
     setAiLoading(true)
     setAiName(null); setSellingName(''); autoFilledPrice.current = false
     setMarketLow(null); setMarketHigh(null); setMarketAvg(null)
@@ -172,7 +188,7 @@ export default function EntryPage() {
         setIsBranded(d.isBranded ?? false)
       }
     } finally { setAiLoading(false) }
-  }, [selectedSource])
+  }, [selectedSource, isWholesale])
 
   function handleImage(file: File, url: string) { setImageFile(file); setPreviewUrl(url); runAI(file) }
 
@@ -193,6 +209,7 @@ export default function EntryPage() {
   async function handleSubmit() {
     if (!cost || !selectedSource) return
     setSubmitting(true)
+    setSubmitError(null)
     try {
       const body = {
         image:           imageFile ? await toBase64(imageFile) : null,
@@ -223,9 +240,33 @@ export default function EntryPage() {
         notes,
         supplier_copy: supplierCopy,
         ad_copy:       adCopy,
+        brand,
       }
-      const res = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      if (res.ok) { setSubmitDone(true); setTimeout(() => { setSubmitDone(false); resetForm() }, 1500) }
+      const filled = variantRows.filter(r => r.label.trim())
+      const res = await fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...body, stock_quantity: filled.length > 0 ? 0 : body.stock_quantity }),
+      })
+      if (res.ok) {
+        const product = await res.json()
+        if (filled.length > 0) {
+          await Promise.all(filled.map((r, i) =>
+            fetch(`/api/products/${product.id}/variants`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ label: r.label.trim(), stock_quantity: parseInt(r.qty) || 0, sort_order: i }),
+            })
+          ))
+        }
+        setSubmitDone(true)
+        setTimeout(() => { setSubmitDone(false); resetForm() }, 1500)
+      } else {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+        setSubmitError(err.error ?? '入庫失敗，請重試')
+      }
+    } catch (e) {
+      setSubmitError(String(e))
     } finally { setSubmitting(false) }
   }
 
@@ -240,11 +281,13 @@ export default function EntryPage() {
     setMarketStage(null); setMarketStageAdvice(null); setMarketMultiplier(1.0)
     setEcommerceCount(0); setSocialLow(null); setSocialHigh(null); setSocialAvg(null); setSocialCount(0)
     setIsBranded(false); setSupplierCopy(''); setAdCopy(''); setCopyOpen(false)
+    setVariantRows([{ label: '', qty: '1' }, { label: '', qty: '1' }])
     autoFilledPrice.current = false
   }
 
   // ── Shared blocks ──────────────────────────────────────────────────
 
+  const accentCls = isWholesale ? 'text-indigo-600' : 'text-pink-600'
   const rateInfo = selectedSource?.exchange_rate
     ? `1 ${selectedSource.currency} ≈ NT$${(selectedSource.exchange_rate * settings.exchange_rate_buffer).toFixed(4)}`
     : selectedSource ? `⚠️ ${selectedSource.currency} 匯率未設定，請至設定頁更新` : ''
@@ -270,9 +313,9 @@ export default function EntryPage() {
           <input type="text" value={productName} onChange={e => setProductName(e.target.value)} placeholder="原廠品名" className={inputCls} />
         </Field>
       </div>
-      <Field label={<span>販售名{aiLoading && <span className="text-pink-400 ml-1.5">AI 生成中…</span>}{aiName && !aiLoading && <span className="text-green-500 ml-1.5">✓</span>}</span>}>
+      <Field label={<span>販售名{!isWholesale && aiLoading && <span className="text-pink-400 ml-1.5">AI 生成中…</span>}{!isWholesale && aiName && !aiLoading && <span className="text-green-500 ml-1.5">✓</span>}</span>}>
         <input type="text" value={sellingName} onChange={e => setSellingName(e.target.value)}
-          placeholder={aiLoading ? 'AI 辨識中…' : '上傳圖片後 AI 自動生成，可修改'} className={inputCls} />
+          placeholder={!isWholesale && aiLoading ? 'AI 辨識中…' : '販售名稱'} className={inputCls} />
       </Field>
     </div>
   )
@@ -332,14 +375,14 @@ export default function EntryPage() {
           </Field>
           {supplierPriceTWD > 0 && <p className="text-xs text-gray-400 mt-1">≈ NT${supplierPriceTWD.toFixed(0)}</p>}
         </div>
-        <Field label="我的賣價 (NT$)">
+        <Field label="我的批發/賣價 (NT$)">
           <input type="number" inputMode="numeric" value={mySellingPrice} onChange={e => setMySellingPrice(e.target.value)} placeholder="0" className={inputLgCls} />
         </Field>
       </div>
     </div>
   )
 
-  const aiBlock = (
+  const aiBlock = !isWholesale && (
     <CostResultCard cost={cost} sellingPrice={sellingPriceNum}
       marketLow={marketLow} marketHigh={marketHigh} marketAvg={marketAvg} ecommerceCount={ecommerceCount}
       socialLow={socialLow} socialHigh={socialHigh} socialAvg={socialAvg} socialCount={socialCount}
@@ -348,7 +391,45 @@ export default function EntryPage() {
       aiName={sellingName || aiName} loading={aiLoading} />
   )
 
-  const copyBlock = (
+  const variantsBlock = (
+    <div className="bg-white rounded-2xl shadow-sm p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-gray-500 font-medium">規格（選填）</p>
+        {hasVariants && <p className="text-[10px] text-gray-400">入庫後庫存數量由規格加總</p>}
+      </div>
+      <div className="space-y-2">
+        {variantRows.map((row, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input
+              value={row.label}
+              onChange={e => setVariantRows(prev => prev.map((r, j) => j === i ? { ...r, label: e.target.value } : r))}
+              placeholder={`規格 ${i + 1}（如 S / 紅色）`}
+              className="flex-1 text-sm border-b border-gray-200 focus:border-pink-400 outline-none pb-1 bg-transparent"
+            />
+            <input
+              type="number"
+              value={row.qty}
+              onChange={e => setVariantRows(prev => prev.map((r, j) => j === i ? { ...r, qty: e.target.value } : r))}
+              placeholder="數量"
+              className="w-16 text-sm text-center border-b border-gray-200 focus:border-pink-400 outline-none pb-1 bg-transparent"
+            />
+            <span className="text-xs text-gray-400">件</span>
+            {variantRows.length > 2 && (
+              <button type="button" onClick={() => setVariantRows(prev => prev.filter((_, j) => j !== i))}
+                className="text-gray-300 hover:text-red-400 text-sm w-5 shrink-0">✕</button>
+            )}
+          </div>
+        ))}
+      </div>
+      <button type="button"
+        onClick={() => setVariantRows(prev => [...prev, { label: '', qty: '1' }])}
+        className="text-xs text-pink-500 hover:text-pink-700 font-medium">
+        ＋ 新增規格
+      </button>
+    </div>
+  )
+
+  const copyBlock = !isWholesale && (
     <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
       <button type="button" onClick={() => setCopyOpen(v => !v)}
         className="w-full px-4 py-3 flex items-center justify-between text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
@@ -365,11 +446,11 @@ export default function EntryPage() {
           </div>
           <button type="button" onClick={generateCopy} disabled={copyLoading || (!imageFile && !supplierCopy && !productName && !aiName)}
             className="w-full py-2.5 rounded-xl text-sm font-medium bg-pink-50 text-pink-600 hover:bg-pink-100 disabled:opacity-40">
-            {copyLoading ? '✨ AI 生成中…' : '✨ AI 生成文案'}
+            {copyLoading ? '✨ AI 生成中…' : '✨ AI 翻譯文案'}
           </button>
           {adCopy && (
             <div>
-              <label className="text-xs text-gray-400 block mb-1">生成文案（可直接編輯）</label>
+              <label className="text-xs text-gray-400 block mb-1">翻譯文案（可直接編輯）</label>
               <textarea value={adCopy} onChange={e => setAdCopy(e.target.value)} rows={12}
                 className="w-full text-sm text-gray-700 bg-gray-50 rounded-xl px-3 py-2 outline-none resize-none leading-relaxed" />
             </div>
@@ -379,41 +460,49 @@ export default function EntryPage() {
     </div>
   )
 
+  const btnBg = isWholesale
+    ? (cost && selectedSource?.exchange_rate ? 'bg-indigo-500 shadow-lg shadow-indigo-200' : 'bg-gray-200 text-gray-400')
+    : (cost && selectedSource?.exchange_rate ? 'bg-pink-500 shadow-lg shadow-pink-200' : 'bg-gray-200 text-gray-400')
+
   const submitBtn = (
-    <button type="button" onClick={handleSubmit} disabled={!cost || submitting || !selectedSource?.exchange_rate}
-      className={`w-full py-4 rounded-2xl text-white font-bold text-base transition-all
-        ${submitDone ? 'bg-green-500' : cost && selectedSource?.exchange_rate ? 'bg-pink-500 shadow-lg shadow-pink-200' : 'bg-gray-200 text-gray-400'}`}>
-      {submitDone ? '✓ 入庫成功！' : submitting ? '寫入中…' : quantity > 0 ? `一鍵入庫 × ${quantity}` : '選品紀錄（庫存 0）'}
-    </button>
+    <div className="space-y-2">
+      <button type="button" onClick={handleSubmit} disabled={!cost || submitting || !selectedSource?.exchange_rate}
+        className={`w-full py-4 rounded-2xl text-white font-bold text-base transition-all ${submitDone ? 'bg-green-500' : btnBg}`}>
+        {submitDone ? '✓ 入庫成功！' : submitting ? '寫入中…' : quantity > 0 ? `一鍵入庫 × ${quantity}` : '選品紀錄（庫存 0）'}
+      </button>
+      {submitError && <p className="text-xs text-red-500 text-center">{submitError}</p>}
+    </div>
   )
+
+  const pageTitle = isWholesale ? '批發倉入庫' : '新增選品'
 
   // ── Desktop layout ─────────────────────────────────────────────────
   const desktopLayout = (
     <div className="p-6">
       <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">新增選品</h1>
+          <h1 className={`text-xl font-bold text-gray-900`}>{pageTitle}</h1>
           {selectedSource?.exchange_rate && (
             <p className="text-sm text-gray-400 mt-0.5">
               1 {selectedSource.currency} ≈ NT${(selectedSource.exchange_rate * settings.exchange_rate_buffer).toFixed(4)}
-              　×{settings.exchange_rate_buffer} 緩衝
+              {!isWholesale && `　×${settings.exchange_rate_buffer} 緩衝`}
             </p>
           )}
         </div>
         {dashboard && (
           <div className="flex gap-3">
             <MiniStat label="本月營收" value={`NT$${(dashboard.month_revenue/1000).toFixed(1)}k`} />
-            <MiniStat label="本月獲利" value={`NT$${(dashboard.month_profit/1000).toFixed(1)}k`} pink />
+            <MiniStat label="本月獲利" value={`NT$${(dashboard.month_profit/1000).toFixed(1)}k`} pink={!isWholesale} indigo={isWholesale} />
             <MiniStat label="在庫" value={`${dashboard.total_stock} 件`} warn={dashboard.low_stock_count > 0} />
           </div>
         )}
       </div>
       <div className="grid grid-cols-5 gap-5">
         <div className="col-span-3 space-y-4">
-          {sourceBlock}{productBlock}{costBlock}{pricingBlock}{copyBlock}
+          {sourceBlock}{productBlock}{costBlock}{pricingBlock}{variantsBlock}{copyBlock}
         </div>
         <div className="col-span-2 space-y-4">
-          <ImageUploader onImage={handleImage} previewUrl={previewUrl} loading={aiLoading} />
+          <ImageUploader onImage={handleImage} previewUrl={previewUrl} loading={aiLoading && !isWholesale} />
           {aiBlock}
           <QuantityPicker value={quantity} onChange={setQuantity} />
           <div className="bg-white rounded-2xl shadow-sm p-4">
@@ -432,8 +521,8 @@ export default function EntryPage() {
     <div className="min-h-screen pb-24">
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-gray-100 px-4 py-3 flex items-center justify-between">
         <div>
-          <h1 className="text-base font-bold text-gray-800">MOUCHI</h1>
-          <p className="text-xs text-gray-400">快速入庫</p>
+          <h1 className="text-base font-bold text-gray-800">{isWholesale ? '批發倉' : 'MOUCHI'}</h1>
+          <p className="text-xs text-gray-400">{isWholesale ? '批發入庫' : '快速入庫'}</p>
         </div>
         <div className="flex items-center gap-3">
           {selectedSource?.exchange_rate && (
@@ -441,20 +530,20 @@ export default function EntryPage() {
               <div>1 {selectedSource.currency} ≈ NT${(selectedSource.exchange_rate * settings.exchange_rate_buffer).toFixed(4)}</div>
             </div>
           )}
-          <Link href="/inventory" className="text-xs text-pink-500 font-medium">庫存 →</Link>
+          <Link href="/inventory" className={`text-xs font-medium ${isWholesale ? 'text-indigo-500' : 'text-pink-500'}`}>庫存 →</Link>
         </div>
       </header>
       <div className="px-4 py-4 space-y-3">
         {dashboard && (
           <div className="grid grid-cols-3 gap-2">
             <StatCard label="本月營收" value={`NT$${(dashboard.month_revenue/1000).toFixed(1)}k`} />
-            <StatCard label="本月獲利" value={`NT$${(dashboard.month_profit/1000).toFixed(1)}k`} accent />
+            <StatCard label="本月獲利" value={`NT$${(dashboard.month_profit/1000).toFixed(1)}k`} accent isWholesale={isWholesale} />
             <StatCard label="在庫商品" value={`${dashboard.total_stock} 件`} warn={dashboard.low_stock_count > 0} />
           </div>
         )}
         {sourceBlock}
-        <ImageUploader onImage={handleImage} previewUrl={previewUrl} loading={aiLoading} compact />
-        {productBlock}{costBlock}{pricingBlock}{aiBlock}{copyBlock}
+        <ImageUploader onImage={handleImage} previewUrl={previewUrl} loading={aiLoading && !isWholesale} compact />
+        {productBlock}{costBlock}{pricingBlock}{variantsBlock}{aiBlock}{copyBlock}
         <QuantityPicker value={quantity} onChange={setQuantity} />
         <div className="bg-white rounded-2xl shadow-sm p-4">
           <label className="text-xs text-gray-400 block mb-1">備註</label>
@@ -470,8 +559,8 @@ export default function EntryPage() {
 
   return (
     <>
-      <div className="hidden lg:block">{desktopLayout}</div>
-      <div className="lg:hidden">{mobileLayout}</div>
+      <div className="hidden md:block">{desktopLayout}</div>
+      <div className="md:hidden">{mobileLayout}</div>
     </>
   )
 }
@@ -483,19 +572,19 @@ const inputLgCls = 'w-full text-lg font-semibold border-b border-gray-200 focus:
 function Field({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return <div><label className="text-xs text-gray-400 block mb-1">{label}</label>{children}</div>
 }
-function MiniStat({ label, value, pink, warn }: { label: string; value: string; pink?: boolean; warn?: boolean }) {
+function MiniStat({ label, value, pink, indigo, warn }: { label: string; value: string; pink?: boolean; indigo?: boolean; warn?: boolean }) {
   return (
     <div className="bg-white rounded-xl border border-gray-100 px-4 py-2 text-center">
       <p className="text-xs text-gray-400">{label}</p>
-      <p className={`text-sm font-bold ${pink ? 'text-pink-600' : warn ? 'text-amber-500' : 'text-gray-800'}`}>{value}</p>
+      <p className={`text-sm font-bold ${pink ? 'text-pink-600' : indigo ? 'text-indigo-600' : warn ? 'text-amber-500' : 'text-gray-800'}`}>{value}</p>
     </div>
   )
 }
-function StatCard({ label, value, accent, warn }: { label: string; value: string; accent?: boolean; warn?: boolean }) {
+function StatCard({ label, value, accent, warn, isWholesale }: { label: string; value: string; accent?: boolean; warn?: boolean; isWholesale?: boolean }) {
   return (
     <div className="bg-white rounded-xl shadow-sm p-3 text-center">
       <p className="text-xs text-gray-400 mb-0.5">{label}</p>
-      <p className={`text-sm font-bold ${accent ? 'text-pink-600' : warn ? 'text-amber-500' : 'text-gray-800'}`}>{value}</p>
+      <p className={`text-sm font-bold ${accent ? (isWholesale ? 'text-indigo-600' : 'text-pink-600') : warn ? 'text-amber-500' : 'text-gray-800'}`}>{value}</p>
     </div>
   )
 }

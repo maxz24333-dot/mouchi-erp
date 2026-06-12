@@ -17,6 +17,8 @@ export interface Settings {
   handling_fee_pct: number
   target_margin_pct: number
   exchange_rate_buffer: number
+  wholesale_target_margin_pct: number
+  wholesale_handling_fee_pct: number
 }
 
 export interface ProductEntry {
